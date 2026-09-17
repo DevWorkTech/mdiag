@@ -17,7 +17,7 @@ $xdiag = $profile('xdiag', true);
 $xdiag['sync'] = [
     'enabled' => (string) env('MDIAG_XDIAG_LOGIN', '') !== ''
         && (string) env('MDIAG_XDIAG_PASSWORD', '') !== '',
-    'driver' => 'xdiag-7.00.004',
+    'driver' => 'xdiag-7.00.014',
     'username' => (string) env('MDIAG_XDIAG_LOGIN', ''),
     'password' => (string) env('MDIAG_XDIAG_PASSWORD', ''),
     // Резервный протокол APK требует SN. Без него резерв не отправляется.

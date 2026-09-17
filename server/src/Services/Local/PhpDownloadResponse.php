@@ -19,6 +19,20 @@ final class PhpDownloadResponse extends BinaryFileResponse
         $localRequest->headers->remove('X-Sendfile-Type');
         $localRequest->headers->remove('X-Accel-Mapping');
         parent::prepare($localRequest);
+        // Symfony 7 может проигнорировать открытый диапазон bytes=N-, когда N за EOF.
+        // Для Android resume возвращаем явный 416, а не повторно весь архив с 200.
+        $range = (string) $localRequest->headers->get('Range', '');
+        $ifRange = $localRequest->headers->get('If-Range');
+        $matches = $ifRange === null || $ifRange === $this->getEtag()
+            || $ifRange === $this->getLastModified()?->format('D, d M Y H:i:s') . ' GMT';
+        if ($localRequest->isMethod('GET') && $matches && $this->getStatusCode() === 200
+            && preg_match('/^bytes=(\d+)-(\d*)$/D', $range, $parts)
+            && (float) $parts[1] >= $this->getFile()->getSize()) {
+            $this->setStatusCode(416);
+            $this->headers->set('Content-Range', 'bytes */' . $this->getFile()->getSize());
+            $this->headers->set('Content-Length', '0');
+            $this->maxlen = 0;
+        }
         return $this;
     }
 }
