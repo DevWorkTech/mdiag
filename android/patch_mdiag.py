@@ -253,6 +253,10 @@ def patch_text_files(
         endpoint_changes += count
 
         if path.suffix.lower() == ".smali":
+            # Эти два fallback-пути зашиты отдельно от assets/config.properties.
+            # Меняем только строковые константы каталога, не методы диагностики.
+            if path.name in {"PathUtils.smali", "DeviceProperties.smali"}:
+                updated = updated.replace('"XDiagPro3"', '"mXDiagPro3"')
             updated, count = const_string.subn(
                 lambda match: match.group(1) + new_package + match.group(2),
                 updated,
