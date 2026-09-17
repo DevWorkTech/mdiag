@@ -1,0 +1,197 @@
+# MDiag DWT APK build
+name: Build mX-DIAG APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      lan_domain:
+        description: Local DNS name used by the APK (no IP address)
+        required: true
+        default: diag.devwork.local
+      source_url:
+        description: Official source APK URL (used when release_tag is empty)
+        required: true
+        default: https://cdn.xdiag.org/apks/xdiag/X-DIAG-V7.00.014-release.apk
+      release_tag:
+        description: Optional release tag containing the source APK
+        required: false
+        default: ''
+      asset_name:
+        description: Source APK asset filename when release_tag is set
+        required: false
+        default: X-DIAG-V7.00.014-release.apk
+  push:
+    branches:
+      - main
+      - codex/mdiag-dwt-v1
+    paths:
+      - android/**
+      - server/**
+      - .github/workflows/build-apk.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SOURCE_URL: ${{ github.event.inputs.source_url || 'https://cdn.xdiag.org/apks/xdiag/X-DIAG-V7.00.014-release.apk' }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
+      ASSET_NAME: ${{ github.event.inputs.asset_name || 'X-DIAG-V7.00.014-release.apk' }}
+      SOURCE_APK: input/X-DIAG-V7.00.014-source.apk
+      OUTPUT_APK: mX-DIAG-7.00.014.apk
+      PROFILE: xdiag
+      LAN_HOST: ${{ github.event.inputs.lan_domain || 'diag.devwork.local' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate Laravel PHP
+        run: find server -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build tools
+        run: |
+          ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n1)"
+          test -x "$SDKMANAGER"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'build-tools;35.0.0'
+
+      - name: Download Apktool
+        run: |
+          curl --fail --location --retry 3 \
+            --output apktool.jar \
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          test -s apktool.jar
+
+      - name: Download source APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input
+
+          if [[ -n "$RELEASE_TAG" ]]; then
+            echo "Downloading $ASSET_NAME from release $RELEASE_TAG"
+            gh release download "$RELEASE_TAG" \
+              --pattern "$ASSET_NAME" \
+              --dir input \
+              --clobber
+            mv "input/$ASSET_NAME" "$SOURCE_APK"
+          else
+            echo "Downloading official X-DIAG APK"
+            curl --fail --location --retry 3 \
+              --output "$SOURCE_APK" \
+              "$SOURCE_URL"
+          fi
+
+          test -s "$SOURCE_APK"
+          # Хеш вложенного владельцем APK: сборка не подхватит другую версию по тому же URL.
+          echo '609b6fdaaf059a36b5442fce28e1341794912a4dd8378a468b1833c4f0c9c423  '"$SOURCE_APK" | sha256sum --check
+          file "$SOURCE_APK"
+          sha256sum "$SOURCE_APK" | tee source-apk.sha256
+
+      - name: Decode APK
+        run: java -jar apktool.jar d --force "$SOURCE_APK" --output decoded
+
+      - name: Apply MDiag DWT patch
+        run: |
+          python3 android/patch_mdiag.py \
+            --decoded decoded \
+            --old-base "$(php -r 'require "server/src/Services/Sync/ProviderSyncClient.php"; require "server/src/Services/Sync/XDiagOfficialClient.php"; echo \DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::PRIMARY_ORIGIN;')" \
+            --new-base "https://$LAN_HOST/$PROFILE" \
+            --lan-host "$LAN_HOST" \
+            --new-package tech.devwork.mxdiag \
+            --label 'mX-DIAG'
+
+      - name: Build unsigned APK
+        run: java -jar apktool.jar b decoded --output build-unsigned.apk
+
+      - name: Locate Android build tools
+        run: |
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
+          echo "BUILD_TOOLS=$BUILD_TOOLS" >> "$GITHUB_ENV"
+
+      - name: Zipalign APK
+        run: '"$BUILD_TOOLS/zipalign" -f -p 4 build-unsigned.apk build-aligned.apk'
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MDIAG_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MDIAG_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MDIAG_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MDIAG_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$KEYSTORE_BASE64" ]]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > mdiag.jks
+            echo "KEY_MODE=stable" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -noprompt \
+              -keystore mdiag.jks \
+              -storepass android \
+              -keypass android \
+              -alias mdiag \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 10000 \
+              -dname 'CN=MDiag DWT, O=DevWorkTech, C=DE'
+            echo "STORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=mdiag" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "KEY_MODE=ephemeral" >> "$GITHUB_ENV"
+          fi
+          if [[ -n "$KEYSTORE_BASE64" ]]; then
+            echo "STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sign APK
+        run: |
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks mdiag.jks \
+            --ks-pass "pass:$STORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out "$OUTPUT_APK" \
+            build-aligned.apk
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -o pipefail
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$OUTPUT_APK"
+          "$BUILD_TOOLS/zipalign" -c -v 4 "$OUTPUT_APK"
+          "$BUILD_TOOLS/aapt" dump badging "$OUTPUT_APK" | tee apk-badging.txt
+          grep -F "package: name='tech.devwork.mxdiag'" apk-badging.txt
+          unzip -Z1 "$OUTPUT_APK" \
+            | grep -E '^lib/[^/]+/.*\.so$' \
+            | tee apk-native-libraries.txt
+          test -s apk-native-libraries.txt
+          sha256sum "$OUTPUT_APK" | tee "$OUTPUT_APK.sha256"
+          printf 'Profile: %s\nLAN base: %s\nSigning mode: %s\n' "$PROFILE" "https://$LAN_HOST/$PROFILE" "$KEY_MODE" \
+            | tee build-info.txt
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mX-DIAG-7.00.014
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            mX-DIAG-7.00.014.apk
+            mX-DIAG-7.00.014.apk.sha256
+            source-apk.sha256
+            apk-badging.txt
+            apk-native-libraries.txt
+            build-info.txt

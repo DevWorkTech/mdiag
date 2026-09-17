@@ -1,0 +1,22 @@
+name: MDiag server tests
+on:
+  push:
+    paths: ['server/**', '.github/workflows/server-tests.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: soap, dom, mbstring, sqlite3, pdo_sqlite
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+        working-directory: server
+      - run: find server/src server/config server/database server/routes server/tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: composer test
+        working-directory: server
