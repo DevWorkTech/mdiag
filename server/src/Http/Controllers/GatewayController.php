@@ -45,7 +45,7 @@ final class GatewayController
                 return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success']);
             }
             if ($action === 'userinfo.get_base_info') {
-                return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success', 'data' => ['user' => $this->userData($user), 'notification' => $user->notification_text]]);
+                return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success', 'data' => $this->userData($user)]);
             }
             $method = $parsed['method'];
             if ($method === 'getRegisteredProductsForPad') {
@@ -95,7 +95,7 @@ final class GatewayController
 
     private function userData(LocalUser $user): array
     {
-        return ['user_id' => (string) $user->id, 'user_name' => $user->login,
+        return ['id' => $user->id, 'user_id' => (string) $user->id, 'user_name' => $user->login,
             'nick_name' => $user->login, 'type' => 2, 'valid' => true,
             'expires_at' => $user->expires_at?->toIso8601String(),
             'notification' => $user->notification_text];

@@ -186,7 +186,10 @@ final class LocalApiTest extends TestCase
         foreach($params as $k=>$v){$parts[]=$k.'='.$v;}
         $params['sign']=md5(implode('&',$parts).$token);
         $this->getJson($this->url('?'.http_build_query($params)))->assertOk()->assertJsonPath('code',0)
-            ->assertJsonPath('data.user.user_id',(string)$u->id);
+            ->assertJsonPath('data.user_id',(string)$u->id);
+        // Профиль e0: плоская data; вход i: вложенная data.user.
+        $this->postJson($this->url('?action=passport_service.login'), ['login_key'=>'tester','password'=>'password-test'])
+            ->assertJsonPath('data.user.user_id',(string)$u->id)->assertJsonPath('data.user.type',2);
         $params['lan']='en';
         $this->getJson($this->url('?'.http_build_query($params)))->assertJsonPath('code',900001);
         Http::assertNothingSent();
