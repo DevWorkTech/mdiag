@@ -20,6 +20,9 @@ $xdiag['sync'] = [
     'driver' => 'xdiag-7.00.014',
     'username' => (string) env('MDIAG_XDIAG_LOGIN', ''),
     'password' => (string) env('MDIAG_XDIAG_PASSWORD', ''),
+    // Необязательные проверенные оператором SOAP URL: при заполнении заменяют автоматический список.
+    // Сохраняйте путь, порт и query (?wsdl), полученные из конфигурации оригинального APK.
+    'soap_endpoints' => ['product' => [], 'diagnostic' => [], 'public' => []],
     // Резервный протокол APK требует SN. Без него резерв не отправляется.
     'fallback_login' => ['enabled' => true, 'serial_no' => '', 'timezone' => null],
 ];

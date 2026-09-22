@@ -73,6 +73,8 @@ final class XDiagOfficialClient implements ProviderSyncClient
     public const METHOD_HISTORY_DIAGNOSTIC = 'queryHistoryDiagSofts';
     public const METHOD_LATEST_PUBLIC = 'queryLatestPublicSofts';
 
+    /** Актуальные SOAP URL из config_service.urls; только для консольной синхронизации. */
+    private array $serviceUrls = [];
     private CookieJar $cookies;
     private ?string $token = null;
     private ?string $userId = null;
@@ -167,6 +169,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
         $this->boot();
         $this->authenticate($report);
         $report('  Авторизация на официальном сервере: OK');
+        $this->refreshServiceUrls($report);
         $serials = $this->registeredSerials();
         $report('  Привязанные сканеры: ' . implode(', ', $serials));
         $packages = [];
@@ -280,7 +283,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
 
         throw new RuntimeException(
             'Пакет не скачался ни с одного официального адреса: '
-            . implode(' | ', $errors),
+            . ($last?->getMessage() ?? 'нет доступных адресов'),
             previous: $last,
         );
     }
@@ -565,24 +568,84 @@ final class XDiagOfficialClient implements ProviderSyncClient
 
         throw new RuntimeException(
             "SOAP-метод {$method} не выполнился: "
-            . implode(' | ', $errors),
+            . implode(' | ', $errors)
+            . ' Проверьте sync.soap_endpoints в config/mdiag-dwt.php; вход повторять не требуется.',
             previous: $last,
         );
+    }
+
+    /**
+     * APK получает адреса по ключам конфигурации, а не выбирает их по имени SOAP-метода.
+     * Пароль и token сюда не передаются. Ошибка bootstrap не отменяет уже успешный вход.
+     */
+    private function refreshServiceUrls(callable $report): void
+    {
+        $this->serviceUrls = [];
+        try {
+            $response = $this->pending()->get(self::PRIMARY_ORIGIN . '/', [
+                'action' => 'config_service.urls', 'app_id' => self::APP_ID, 'ver' => self::PROTOCOL_VERSION,
+            ]);
+            $rows = $response->json('data.urls');
+            if (!$response->successful() || !is_array($rows)) {
+                throw new RuntimeException('HTTP ' . $response->status() . '; нет data.urls');
+            }
+            foreach ($rows as $row) {
+                if (!is_array($row) || !is_string($row['key'] ?? null) || !is_string($row['value'] ?? null)) { continue; }
+                foreach (['product' => 'productservice.*', 'diagnostic' => 'xdigpaddiagsoftservice.*',
+                    'public' => 'xdigpadpublicsoftservice.*'] as $service => $key) {
+                    if ($row['key'] === $key && $this->trustedSoapUrl($row['value'])) {
+                        $this->serviceUrls[$service] = $row['value'];
+                    }
+                }
+            }
+            $report('  Конфигурация сервисов: получено SOAP-адресов ' . count($this->serviceUrls));
+        } catch (Throwable $exception) {
+            // Не печатаем тело ответа, cookies и URL с секретами.
+            $report('  Конфигурация сервисов недоступна; использую адреса APK/настройки.');
+        }
+    }
+
+    /** Не разрешаем конфигурационному ответу отправить cc/sign на посторонний хост. */
+    private function trustedSoapUrl(string $url): bool
+    {
+        $p = parse_url($url);
+        if ($p === false || ($p['scheme'] ?? '') !== 'https' || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) { return false; }
+        $host = strtolower((string) ($p['host'] ?? ''));
+        return in_array($host, ['services.x-diag.info', 'config.x-diag.info'], true);
     }
 
     /** @return list<string> */
     private function soapEndpoints(string $service): array
     {
+        // Явно заданные оператором адреса имеют приоритет над bootstrap и встроенными.
+        // Это доверенная локальная настройка, а не параметры запроса планшета.
+        $configured = (array) $this->config->get('mdiag-dwt.profiles.xdiag.sync.soap_endpoints.' . $service, []);
+        if ($configured !== []) {
+            foreach ($configured as $url) {
+                $p = is_string($url) ? parse_url($url) : false;
+                if ($p === false || ($p['scheme'] ?? '') !== 'https' || empty($p['host'])
+                    || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) {
+                    throw new RuntimeException('Некорректный HTTPS адрес sync.soap_endpoints.' . $service);
+                }
+            }
+            return array_values(array_unique($configured));
+        }
         $path = match ($service) {
             'product' => self::PRODUCT_WSDL_PATH,
             'public' => self::PUBLIC_WSDL_PATH,
             default => self::DIAGNOSTIC_WSDL_PATH,
         };
-
-        return [
-            self::PRIMARY_ORIGIN . explode('?', $path, 2)[0],
-            self::PORT_8000_ORIGIN . explode('?', $path, 2)[0],
-        ];
+        $urls = [];
+        if (isset($this->serviceUrls[$service])) {
+            $urls[] = $this->serviceUrls[$service];
+        }
+        // SoapClient(null) не читает WSDL даже если в location остался ?wsdl.
+        // Сначала точный URL из APK/bootstrap, затем вариант без query.
+        $urls[] = self::PRIMARY_ORIGIN . $path;
+        $urls[] = self::PRIMARY_ORIGIN . explode('?', $path, 2)[0];
+        $urls[] = self::PORT_8000_ORIGIN . $path;
+        $urls[] = self::PORT_8000_ORIGIN . explode('?', $path, 2)[0];
+        return array_values(array_unique($urls));
     }
 
     /** Создаёт SOAP-клиент с cookie login-сессии и Android User-Agent. */

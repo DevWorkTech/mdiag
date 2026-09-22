@@ -195,4 +195,26 @@ final class LocalApiTest extends TestCase
         Http::assertNothingSent();
     }
 
+    /** Bootstrap из APK меняет маршрут SOAP; внешний хост не получает подпись сессии. */
+    public function test_sync_resolves_advertised_soap_urls_and_explicit_override(): void
+    {
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::preventStrayRequests();
+        Http::fake(['*' => Http::response(['code'=>0,'data'=>['urls'=>[
+            ['key'=>'productservice.*','value'=>'https://services.x-diag.info/changed/product.php?wsdl'],
+            ['key'=>'xdigpaddiagsoftservice.*','value'=>'https://untrusted.invalid/capture'],
+        ]]],200)]);
+        $client=$this->app->make(\DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::class);
+        (new \ReflectionMethod($client,'refreshServiceUrls'))->invoke($client,static function ($message) {});
+        $method=new \ReflectionMethod($client,'soapEndpoints');
+        $urls=$method->invoke($client,'product');
+        $this->assertSame('https://services.x-diag.info/changed/product.php?wsdl',$urls[0]);
+        $this->assertNotContains('https://untrusted.invalid/capture',$method->invoke($client,'diagnostic'));
+        Http::assertSent(function ($r) {
+            return $r->method()==='GET' && !isset($r['password']) && !isset($r['token']);
+        });
+        config(['mdiag-dwt.profiles.xdiag.sync.soap_endpoints.product'=>['https://mirror.example.test/products?wsdl']]);
+        $this->assertSame(['https://mirror.example.test/products?wsdl'],$method->invoke($client,'product'));
+    }
+
 }
