@@ -24,10 +24,10 @@ final class WebContent
             foreach ($this->settings($module, 'paths') as $prefix) {
                 if ($path !== $prefix && !str_starts_with($path, rtrim($prefix,'/').'/')) { continue; }
                 if (!in_array($method, ['GET','HEAD'], true) || in_array($module->key(), ['customers','workshop'], true)) {
-                    return response()->json(['code'=>900011,'msg'=>$module->title().': локальный адаптер ещё не реализован.'],501);
+                    return response()->json(['code'=>900008,'msg'=>$module->title().': локальный адаптер ещё не реализован.'],501);
                 }
                 $file=$this->root().'/'.$module->key().'/current.txt';
-                if (!is_file($file)) { return response()->json(['code'=>900011,'msg'=>'Локальный снимок отсутствует. Выполните mdiag:sync xdiag --content='.$module->key()],503); }
+                if (!is_file($file)) { return response()->json(['code'=>900008,'msg'=>'Локальный снимок отсутствует. Выполните mdiag:sync xdiag --content='.$module->key()],503); }
                 return response(file_get_contents($file))->header('Content-Type','text/plain; charset=UTF-8')->header('X-Content-Type-Options','nosniff');
             }
         }

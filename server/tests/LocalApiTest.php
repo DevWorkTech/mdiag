@@ -305,7 +305,7 @@ final class LocalApiTest extends TestCase
 
     public function test_web_module_stubs_and_content_list_never_proxy(): void
     {
-        $this->getJson($this->url('customers'))->assertStatus(501)->assertJsonPath('code',900011);
+        $this->getJson($this->url('customers'))->assertStatus(501)->assertJsonPath('code',900008);
         $this->getJson($this->url('workshop'))->assertStatus(501);
         $this->artisan('mdiag:sync',['provider'=>'xdiag','--content'=>['all'],'--list'=>true])->assertSuccessful();
         $this->artisan('mdiag:sync',['provider'=>'xdiag','--content'=>['invalid']])->assertFailed();
