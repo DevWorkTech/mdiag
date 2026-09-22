@@ -217,4 +217,20 @@ final class LocalApiTest extends TestCase
         $this->assertSame(['https://mirror.example.test/products?wsdl'],$method->invoke($client,'product'));
     }
 
+    public function test_service_config_dictionary_aliases_and_redacted_rejection(): void
+    {
+        $client=$this->app->make(\DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::class);
+        $messages=[];
+        (new \ReflectionMethod($client,'parseServiceUrls'))->invoke($client, [
+            'getRegisteredProductsForPad'=>'https://services.x-diag.info/new/products?wsdl',
+            'productservice.*'=>'http://79.174.70.103:8000/products?token=PRIVATE_TOKEN',
+        ], static function ($m) use (&$messages) {$messages[]=$m;});
+        $urls=(new \ReflectionMethod($client,'soapEndpoints'))->invoke($client,'product');
+        $this->assertSame('https://services.x-diag.info/new/products?wsdl',$urls[0]);
+        $log=implode("\n",$messages);
+        $this->assertStringContainsString('79.174.70.103:8000/products',$log);
+        $this->assertStringContainsString('отклонён',$log);
+        $this->assertStringNotContainsString('PRIVATE_TOKEN',$log);
+    }
+
 }

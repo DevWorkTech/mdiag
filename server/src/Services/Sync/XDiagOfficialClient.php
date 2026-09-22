@@ -589,19 +589,71 @@ final class XDiagOfficialClient implements ProviderSyncClient
             if (!$response->successful() || !is_array($rows)) {
                 throw new RuntimeException('HTTP ' . $response->status() . '; нет data.urls');
             }
-            foreach ($rows as $row) {
-                if (!is_array($row) || !is_string($row['key'] ?? null) || !is_string($row['value'] ?? null)) { continue; }
-                foreach (['product' => 'productservice.*', 'diagnostic' => 'xdigpaddiagsoftservice.*',
-                    'public' => 'xdigpadpublicsoftservice.*'] as $service => $key) {
-                    if ($row['key'] === $key && $this->trustedSoapUrl($row['value'])) {
-                        $this->serviceUrls[$service] = $row['value'];
-                    }
-                }
-            }
+            $this->parseServiceUrls($rows, $report);
             $report('  Конфигурация сервисов: получено SOAP-адресов ' . count($this->serviceUrls));
+            if (!isset($this->serviceUrls['product'])) {
+                $report('  В конфигурации не выбран сервис product: смотрите строки config ниже/выше; адрес списка сканеров пока не подтверждён.');
+            }
         } catch (Throwable $exception) {
             // Не печатаем тело ответа, cookies и URL с секретами.
             $report('  Конфигурация сервисов недоступна; использую адреса APK/настройки.');
+        }
+    }
+
+    /**
+     * Принимает список key/value и словарь key => URL.
+     * Выводит только известный ключ, origin/path и имена query-параметров.
+     * Значения query (в том числе token/sign), userinfo и fragment не выводятся.
+     */
+    private function parseServiceUrls(array $rows, callable $report): void
+    {
+        $keys = [
+            'product' => ['productservice.*', 'getRegisteredProductsForPad'],
+            'diagnostic' => ['xdigpaddiagsoftservice.*', 'queryLatestDiagSofts'],
+            'public' => ['xdigpadpublicsoftservice.*', 'queryLatestPublicSofts'],
+        ];
+        $seen = 0;
+        $observedKeys = [];
+        foreach ($rows as $index => $row) {
+            $key = is_array($row) ? ($row['key'] ?? null) : (is_string($index) ? $index : null);
+            $url = is_array($row) ? ($row['value'] ?? null) : $row;
+            if (is_string($key) && preg_match('/^[a-zA-Z0-9_.\*-]{1,100}$/D', $key)) {
+                $observedKeys[] = $key;
+            }
+            if (!is_string($key) || !is_string($url)) { continue; }
+            foreach ($keys as $service => $aliases) {
+                if (!in_array($key, $aliases, true)) { continue; }
+                $seen++;
+                $p = parse_url(trim($url));
+                $safe = '[некорректный URL]';
+                if (is_array($p) && isset($p['host'])) {
+                    $safe = ($p['scheme'] ?? '') . '://' . $p['host']
+                        . (isset($p['port']) ? ':' . $p['port'] : '') . ($p['path'] ?? '/');
+                    if (isset($p['query'])) {
+                        parse_str($p['query'], $query);
+                        $safe .= '?' . implode('&', array_map(
+                            static fn ($k) => $k === 'wsdl' ? 'wsdl' : rawurlencode((string) $k) . '=[скрыто]',
+                            array_keys($query),
+                        ));
+                    }
+                }
+                // Управляющие символы исключены из строк терминала.
+                $safe = preg_replace('/[\\x00-\\x1f\\x7f]/', '', $safe);
+                if (!$this->trustedSoapUrl(trim($url))) {
+                    $report('  config ' . $key . ': ' . $safe . ' — отклонён: схема/хост вне разрешённого списка.');
+                    continue;
+                }
+                // Wildcard-ключ APK приоритетнее алиаса конкретного метода.
+                if (!isset($this->serviceUrls[$service]) || $key === $aliases[0]) {
+                    $this->serviceUrls[$service] = trim($url);
+                }
+                $report('  config ' . $key . ': ' . $safe . ' — принят.');
+            }
+        }
+        if ($seen === 0) {
+            $report('  config: ни одного ожидаемого ключа в data.urls; элементов: ' . count($rows)
+                . '; формат: ' . (array_is_list($rows) ? 'список' : 'словарь') . '.');
+            $report('  config: имена ключей (без значений): ' . implode(', ', array_slice(array_unique($observedKeys), 0, 40)));
         }
     }
 
