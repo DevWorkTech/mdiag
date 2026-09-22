@@ -33,6 +33,7 @@ final class GatewayController
             if ($action === 'passport_service.login') {
                 if (!$request->isMethod('POST')) { throw new AccessDenied('invalid_request'); }
                 [$user, $session, $token] = $auth->login($provider, $request);
+                $this->recordLogin('success');
                 return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success', 'data' => [
                     'token' => $token, 'user' => $this->userData($user),
                     'xmpp' => ['ip' => parse_url((string) config('mdiag-dwt.base_url'), PHP_URL_HOST), 'domain' => parse_url((string) config('mdiag-dwt.base_url'), PHP_URL_HOST), 'port' => '5222'],
@@ -78,6 +79,9 @@ final class GatewayController
             }
             throw new AccessDenied('unsupported');
         } catch (AccessDenied $e) {
+            if ($request->input('action') === 'passport_service.login') {
+                $this->recordLogin($e->reason);
+            }
             $response = $errors->respond($provider, $parsed, $e, $protocol);
             if (in_array(ltrim((string) $path, '/'), LocalCatalog::DOWNLOAD_PATHS, true)) {
                 $response->setStatusCode($e->reason === 'not_found' ? 404 : ($e->reason === 'session_invalid' ? 401 : 403));
@@ -86,11 +90,23 @@ final class GatewayController
         } catch (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException) {
             return $errors->respond($provider, $parsed, new AccessDenied('unsupported'), $protocol);
         } catch (\Throwable) {
+            if ($request->input('action') === 'passport_service.login') {
+                $this->recordLogin('internal_error');
+            }
             // Не вызываем report(): глобальный трекер Laravel может отправить запрос наружу.
             // Не включаем текст SQL/пароль/токен в ответ планшету.
             return $protocol->reply($parsed, ['code' => 900012, 'msg' => 'Ошибка локального сервера.',
                 'message' => 'Ошибка локального сервера.', 'data' => null], 500);
         }
+    }
+
+    /** Только время и причина: без логина, пароля, SN, токена и внешних логгеров. */
+    private function recordLogin(string $result): void
+    {
+        if (!(bool) config('mdiag-dwt.auth.diagnostic_log', false)) { return; }
+        $line = gmdate('c') . ' login ' . preg_replace('/[^a-z_]/', '', $result) . PHP_EOL;
+        // Ошибка записи диагностического файла не должна ломать вход.
+        @file_put_contents(storage_path('logs/mdiag-auth.log'), $line, FILE_APPEND | LOCK_EX);
     }
 
     private function userData(LocalUser $user): array

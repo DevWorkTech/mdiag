@@ -26,12 +26,14 @@ php artisan vendor:publish --provider='DevWorkTech\MDiag\MDiagServiceProvider' -
 
 ## 2. Настройки
 
-В `.env` измените существующие значения без дубликатов:
+`APP_URL` оставьте адресом основного Laravel-проекта. MDiag использует собственный
+`$domain` в `config/mdiag-dwt.php` для ограничения маршрутов и генерации ссылок.
+В существующем проекте также сохраните текущие DB/CACHE/SESSION настройки.
+Ниже пример для новой установки; в существующей добавьте только MDIAG-параметры:
 
 ```dotenv
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://diag.devwork.local
 DB_CONNECTION=sqlite
 DB_DATABASE=/var/www/my-project/database/database.sqlite
 SESSION_DRIVER=file
@@ -299,3 +301,56 @@ CLI получает актуальные SOAP URL из `config_service.urls`. �
 Если основной сервер продолжает отвечать 404 и актуальная конфигурация не возвращает
 рабочий адрес, требуется URL из сетевого запроса оригинального приложения. Без проверки
 на реальном аккаунте доступность закрытого сервиса подтвердить невозможно.
+
+## Локальный TLS и диагностика входа планшета
+
+`verify_tls=false` управляет только внешней CLI-синхронизацией. Эта настройка
+не отключает TLS-проверку в Android. Для mX-DIAG предусмотрены пользовательский
+CA и необязательный встроенный CA, доверие ограничено доменом сборки.
+
+Если Android пишет «не удаётся открыть сертификат», сначала проверьте сам файл
+и экспортируйте **существующий CA**, не генерируя новые ключи:
+```bash
+sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -noout -subject -dates -ext basicConstraints
+sudo openssl verify -CAfile /etc/nginx/mdiag-tls/mdiag-local-ca.crt /etc/nginx/mdiag-tls/diag.devwork.local.crt
+sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -outform DER -out /tmp/mdiag-local-ca.cer
+sudo chmod 644 /tmp/mdiag-local-ca.cer
+```
+Передайте /tmp/mdiag-local-ca.cer на планшет как файл, сохраните в Downloads.
+Устанавливайте через настройки безопасности → установка сертификата → **сертификат CA**,
+а не «VPN/приложения» и не простым открытием вложения. Названия меню зависят от Android.
+Нужен CA с CA:TRUE, не серверный leaf-сертификат. Приватный ключ не передавайте.
+По одному сообщению Android причину сбоя импорта определить нельзя.
+
+Вариант без ручной установки: создайте GitHub Actions secret **MDIAG_CA_CERT_PEM**
+с полным содержимым публичного mdiag-local-ca.crt (BEGIN/END CERTIFICATE).
+Запустите Build mX-DIAG APK с вашим lan_domain. Сборка включает сертификат
+в res/raw, а domain-config доверяет ему только для этого имени. Без секрета
+сборка по-прежнему требует установленный CA. Системный/пользовательский TLS trust
+не гарантирует работу стороннего клиента с собственным TrustManager/pinning;
+это проверяется на устройстве. Проверка имени и срока сертификата сохраняется.
+
+Адреса SOAP планшет получает локально через:
+`https://diag.devwork.local/xdiag/?action=config_service.urls`.
+Bootstrap возвращает таблицу официальных ключей, но все URL ведут в локальный
+профиль. В APK также есть локальная assets/configurl.json как начальная таблица.
+Внешние зеркала CLI не должны попадать в ответы планшету. Прозрачное резервирование
+одного домена организуется локальным DNS/reverse proxy, а не резервным входом
+планшета на официальный сервер.
+
+Для диагностики добавьте в `auth` опубликованного конфига:
+```php
+'diagnostic_log' => true,
+```
+Затем:
+```bash
+php artisan optimize:clear
+tail -f storage/logs/mdiag-auth.log /var/log/nginx/mdiag-access.log
+```
+Повторите вход на планшете локальной учётной записью.
+`success` подтверждает выдачу локальной сессии; `invalid_credentials` — неверный
+локальный логин/пароль; `user_disabled` — блокировку; `subscription_expired` —
+истечение срока; `internal_error` — ошибку сервера. Если нет HTTP-запроса в Nginx,
+сначала проверяйте DNS/подключение/TLS на планшете. Наличие HTTP-запроса к другому
+path не доказывает успешность login. После проверки выключите diagnostic_log.
+Файл содержит только время и причину, без идентификаторов и секретов.

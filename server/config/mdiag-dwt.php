@@ -7,6 +7,8 @@ declare(strict_types=1);
  * Входящий HTTP API никогда не обращается к поставщику. Интернет использует
  * только консольный клиент синхронизации с учётной записью владельца сервера.
  */
+// Независим от APP_URL основного Laravel. Здесь только DNS-имя без схемы/пути.
+// Этим же значением ограничены routes и построение всех локальных URL.
 $domain = 'diag.devwork.local';
 $profile = static fn (string $name, bool $enabled = false): array => [
     'enabled' => $enabled,
@@ -40,6 +42,9 @@ return [
     'request_timeout' => 120,
     'verify_tls' => false,
     'auth' => [
+        // На время диагностики входа: отдельный локальный файл logs/mdiag-auth.log.
+        // Сохраняет только время и причину, не использует глобальные log handlers.
+        'diagnostic_log' => false,
         'session_hours' => 12,
         'max_sessions' => 5,
         'login_attempts' => 10,

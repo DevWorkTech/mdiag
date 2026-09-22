@@ -105,14 +105,21 @@ jobs:
         run: java -jar apktool.jar d --force "$SOURCE_APK" --output decoded
 
       - name: Apply MDiag DWT patch
+        env:
+          MDIAG_CA_CERT_PEM: ${{ secrets.MDIAG_CA_CERT_PEM }}
         run: |
+          ca_args=()
+          if [[ -n "$MDIAG_CA_CERT_PEM" ]]; then
+            printf '%s\n' "$MDIAG_CA_CERT_PEM" > "$RUNNER_TEMP/mdiag-ca.pem"
+            ca_args=(--ca-cert "$RUNNER_TEMP/mdiag-ca.pem")
+          fi
           python3 android/patch_mdiag.py \
             --decoded decoded \
             --old-base "$(php -r 'require "server/src/Services/Sync/ProviderSyncClient.php"; require "server/src/Services/Sync/XDiagOfficialClient.php"; echo \DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::PRIMARY_ORIGIN;')" \
             --new-base "https://$LAN_HOST/$PROFILE" \
             --lan-host "$LAN_HOST" \
             --new-package tech.devwork.mxdiag \
-            --label 'mX-DIAG'
+            --label 'mX-DIAG' "${ca_args[@]}"
 
       - name: Build unsigned APK
         run: java -jar apktool.jar b decoded --output build-unsigned.apk

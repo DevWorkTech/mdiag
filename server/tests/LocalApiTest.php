@@ -268,4 +268,22 @@ final class LocalApiTest extends TestCase
         }
     }
 
+    /** Основной сайт имеет другой APP_URL; вход и bootstrap остаются на домене MDiag. */
+    public function test_local_domain_and_form_login_are_independent_of_app_url(): void
+    {
+        config(['app.url'=>'https://main.example.test']);
+        $this->account();
+        $this->post($this->url('?action=passport_service.login'),
+            ['login_key'=>'tester','password'=>'password-test','type'=>'0','app_id'=>'21035','ver'=>'5.3.0'])
+            ->assertOk()->assertJsonPath('code',0)->assertJsonPath('data.user.user_name','tester');
+        $urls=$this->getJson($this->url('?action=config_service.urls'))->assertOk()->json('data.urls');
+        $byKey=array_column($urls,'value','key');
+        foreach (['login','config.urls','productservice.*','xdigpaddiagsoftservice.*','xdigpadpublicsoftservice.*'] as $key) {
+            $this->assertArrayHasKey($key,$byKey);
+            $this->assertStringStartsWith('https://diag.devwork.local/xdiag/',$byKey[$key]);
+        }
+        $this->post('https://main.example.test/xdiag/?action=passport_service.login',
+            ['login_key'=>'tester','password'=>'password-test'])->assertNotFound();
+        Http::assertNothingSent();
+    }
 }

@@ -61,7 +61,11 @@ rm -f "$tls_dir/$domain_name.csr" "$tls_dir/mdiag-local-ca.srl"
 chmod 0600 "$tls_dir"/*.key
 chmod 0644 "$tls_dir"/*.crt
 
+# DER удобен для импорта через системный выбор CA на Android.
+openssl x509 -in "$tls_dir/mdiag-local-ca.crt" -outform DER -out "$tls_dir/mdiag-local-ca.cer"
+chmod 0644 "$tls_dir/mdiag-local-ca.cer"
+
 echo "Server certificate: $tls_dir/$domain_name.crt"
 echo "Server private key: $tls_dir/$domain_name.key"
 echo "Install this CA certificate on the Android tablet:"
-echo "$tls_dir/mdiag-local-ca.crt"
+echo "$tls_dir/mdiag-local-ca.cer"

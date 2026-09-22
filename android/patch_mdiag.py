@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
@@ -159,12 +160,25 @@ def patch_resource_namespaces(
     return files_changed, replacements
 
 
-def write_network_security(root: Path, lan_host: str) -> None:
+def write_network_security(root: Path, lan_host: str, ca_file: Path | None = None) -> None:
     if not re.fullmatch(r"[A-Za-z0-9.-]+", lan_host):
         raise RuntimeError(f"Invalid LAN host: {lan_host!r}")
 
     xml_dir = root / "res" / "xml"
     xml_dir.mkdir(parents=True, exist_ok=True)
+    extra_anchor = ""
+    if ca_file is not None:
+        # В APK попадает только публичный сертификат. PEM и DER нормализуем в PEM.
+        data = ca_file.read_bytes()
+        if b"PRIVATE KEY" in data:
+            raise RuntimeError("CA file must not contain a private key")
+        fmt = "PEM" if b"-----BEGIN CERTIFICATE-----" in data else "DER"
+        checked = subprocess.run(["openssl", "x509", "-inform", fmt, "-in", str(ca_file),
+                                  "-outform", "PEM"], check=True, capture_output=True).stdout
+        raw_dir = root / "res" / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "mdiag_local_ca.pem").write_bytes(checked)
+        extra_anchor = '            <certificates src="@raw/mdiag_local_ca" />'
     (xml_dir / "mdiag_network_security_config.xml").write_text(
         f"""<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
@@ -178,6 +192,7 @@ def write_network_security(root: Path, lan_host: str) -> None:
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />
+{extra_anchor}
         </trust-anchors>
     </domain-config>
 </network-security-config>
@@ -275,6 +290,7 @@ def main() -> int:
     parser.add_argument("--old-base", required=True)
     parser.add_argument("--new-base", required=True)
     parser.add_argument("--lan-host")
+    parser.add_argument("--ca-cert", type=Path, help="Public LAN CA certificate (PEM/DER); never a key")
     parser.add_argument("--new-package", required=True)
     parser.add_argument("--label", default="mX-DIAG")
     args = parser.parse_args()
@@ -294,7 +310,7 @@ def main() -> int:
         root,
         original_package,
     )
-    write_network_security(root, lan_host)
+    write_network_security(root, lan_host, args.ca_cert)
 
     endpoints, package_strings = patch_text_files(
         root,
