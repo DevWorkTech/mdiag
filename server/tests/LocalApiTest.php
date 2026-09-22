@@ -233,4 +233,39 @@ final class LocalApiTest extends TestCase
         $this->assertStringNotContainsString('PRIVATE_TOKEN',$log);
     }
 
+    /** Реальный bootstrap: IP и /services/v2/ должны сохраняться для всех трёх сервисов. */
+    public function test_sync_accepts_official_ip_service_configuration(): void
+    {
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::preventStrayRequests();
+        $base='https://79.174.70.97/services/v2/';
+        Http::fake(['*'=>Http::response(['code'=>0,'data'=>['urls'=>[
+            ['key'=>'getRegisteredProductsForPad','value'=>$base.'productService.php?wsdl'],
+            ['key'=>'productservice.*','value'=>$base.'productService.php?wsdl'],
+            ['key'=>'queryLatestDiagSofts','value'=>$base.'xdigPadDiagSoftService.php?wsdl'],
+            ['key'=>'xdigpaddiagsoftservice.*','value'=>$base.'xdigPadDiagSoftService.php?wsdl'],
+            ['key'=>'xdigpadpublicsoftservice.*','value'=>$base.'xdigPadPublicSoftService.php?wsdl'],
+        ]]],200)]);
+        $client=$this->app->make(\DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::class);
+        $messages=[];
+        (new \ReflectionMethod($client,'refreshServiceUrls'))->invoke($client,
+            static function ($message) use (&$messages) {$messages[]=$message;});
+        $method=new \ReflectionMethod($client,'soapEndpoints');
+        foreach (['product'=>'productService','diagnostic'=>'xdigPadDiagSoftService','public'=>'xdigPadPublicSoftService'] as $kind=>$file) {
+            $this->assertSame($base.$file.'.php?wsdl',$method->invoke($client,$kind)[0]);
+        }
+        $this->assertStringContainsString('получено SOAP-адресов 3',implode("\n",$messages));
+        $this->assertStringNotContainsString('отклонён',implode("\n",$messages));
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($r)=>$r->url()==='https://services.x-diag.info/?action=config_service.urls&app_id=21035&ver=5.3.0');
+        // Разрешён именно подтверждённый IP, а не произвольный адрес из сети.
+        $trust=new \ReflectionMethod($client,'trustedSoapUrl');
+        foreach (['https://79.174.70.97.evil.invalid/services/v2/productService.php',
+            'https://79.174.70.98/services/v2/productService.php',
+            'https://127.0.0.1/services/v2/productService.php',
+            'https://user:pass@79.174.70.97/services/v2/productService.php'] as $url) {
+            $this->assertFalse($trust->invoke($client,$url));
+        }
+    }
+
 }

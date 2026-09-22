@@ -663,7 +663,9 @@ final class XDiagOfficialClient implements ProviderSyncClient
         $p = parse_url($url);
         if ($p === false || ($p['scheme'] ?? '') !== 'https' || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) { return false; }
         $host = strtolower((string) ($p['host'] ?? ''));
-        return in_array($host, ['services.x-diag.info', 'config.x-diag.info'], true);
+        // IP присутствует в SOAP namespace APK и подтверждён ответом config_service.urls.
+        // Сам путь (/services/v2/ и последующие версии) берём из ответа, не строим вручную.
+        return in_array($host, ['services.x-diag.info', 'config.x-diag.info', '79.174.70.97'], true);
     }
 
     /** @return list<string> */
@@ -706,7 +708,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
         if (isset($this->soapClients[$endpoint])) {
             return $this->soapClients[$endpoint];
         }
-        // APK не загружает WSDL: SOAP 1.1 отправляется прямо на endpoint без ?wsdl.
+        // WSDL не загружаем: SOAP 1.1 отправляется прямо на выбранный URL сервиса.
         $verifyTls = (bool) $this->config->get('mdiag-dwt.verify_tls', false);
         $context = stream_context_create([
             'ssl' => [
