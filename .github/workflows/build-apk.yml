@@ -16,7 +16,7 @@ on:
       source_url:
         description: Official source APK URL (used when release_tag is empty)
         required: true
-        default: https://cdn.xdiag.org/apks/xdiag/X-DIAG-V7.00.014-release.apk
+        default: https://testnet-faucet.devwork.tech/X-DIAG_V7.00.014.apk
       release_tag:
         description: Optional release tag containing the source APK
         required: false
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: ${{ github.event.inputs.source_url || 'https://cdn.xdiag.org/apks/xdiag/X-DIAG-V7.00.014-release.apk' }}
+      SOURCE_URL: ${{ github.event.inputs.source_url || 'https://testnet-faucet.devwork.tech/X-DIAG_V7.00.014.apk' }}
       RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
       ASSET_NAME: ${{ github.event.inputs.asset_name || 'X-DIAG-V7.00.014-release.apk' }}
       SOURCE_APK: input/X-DIAG-V7.00.014-source.apk
@@ -115,6 +115,9 @@ jobs:
       - name: Decode APK
         run: java -jar apktool.jar d --force "$SOURCE_APK" --output decoded
 
+      - name: Audit source network code
+        run: python3 android/audit_network.py decoded --output network-before.json
+
       - name: Apply MDiag DWT patch
         env:
           MDIAG_CA_CERT_PEM: ${{ secrets.MDIAG_CA_CERT_PEM }}
@@ -131,6 +134,9 @@ jobs:
             --lan-host "$LAN_HOST" \
             --new-package tech.devwork.mxdiag \
             --label 'mX-DIAG' "${ca_args[@]}"
+
+      - name: Audit patched network code
+        run: python3 android/audit_network.py decoded --output network-after.json
 
       - name: Build unsigned APK
         run: java -jar apktool.jar b decoded --output build-unsigned.apk
@@ -213,6 +219,8 @@ jobs:
             apk-badging.txt
             apk-native-libraries.txt
             build-info.txt
+            network-before.json
+            network-after.json
 
 
       - name: Package ZIP
@@ -233,3 +241,4 @@ jobs:
             mX-DIAG-7.00.014.zip mX-DIAG-7.00.014.zip.sha256 \
             --target "$GITHUB_SHA" --title "mX-DIAG 7.00.014 build ${GITHUB_RUN_NUMBER}" \
             --notes-file release-notes.txt --latest
+
