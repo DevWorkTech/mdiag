@@ -299,3 +299,4 @@
   "xdigpaddiagsoftservice.*": "/services/xdigPadDiagSoftService.php?wsdl",
   "xdigpadpublicsoftservice.*": "/services/xdigPadPublicSoftService.php?wsdl"
 }
+

@@ -38,6 +38,7 @@ final class MDiagServiceProvider extends ServiceProvider
                 ScannerAccessCommand::class,
                 ScannerListCommand::class,
                 SyncPackagesCommand::class,
+                \DevWorkTech\MDiag\Console\DoctorCommand::class,
             ]);
         }
     }
@@ -71,8 +72,10 @@ final class MDiagServiceProvider extends ServiceProvider
             'mdiag-dwt.',
         );
 
+        $middleware = array_merge([\DevWorkTech\MDiag\Http\Middleware\TraceRequests::class], $middleware);
         $routes = Route::middleware($middleware)->as($namePrefix);
         $routes->domain($domain);
         $routes->group(__DIR__ . '/../routes/api.php');
     }
 }
+

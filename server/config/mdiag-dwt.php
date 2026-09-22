@@ -10,6 +10,8 @@ declare(strict_types=1);
 // Независим от APP_URL основного Laravel. Здесь только DNS-имя без схемы/пути.
 // Этим же значением ограничены routes и построение всех локальных URL.
 $domain = 'diag.devwork.local';
+// http допустим для отдельной LAN-сборки без TLS; схема должна совпадать с APK/Nginx.
+$scheme = 'https';
 $profile = static fn (string $name, bool $enabled = false): array => [
     'enabled' => $enabled,
     'prefix' => $name,
@@ -34,7 +36,7 @@ return [
         'middleware' => ['api'], 'route_name_prefix' => 'mdiag-dwt.',
     ],
     'local_domain' => $domain,
-    'base_url' => 'https://' . $domain,
+    'base_url' => $scheme . '://' . $domain,
     // Пакеты приватные: никогда не размещайте этот каталог под nginx alias.
     'package_root' => storage_path('app/private/mdiag/packages'),
     'snapshot_root' => storage_path('app/private/mdiag/snapshots'),
@@ -52,9 +54,12 @@ return [
         // Регистрация локальная; новые пользователи заблокированы до разрешения оператора.
         'registration_enabled' => false,
     ],
+    // Необязательные sources/paths для публичных web-снимков. Подробнее src/Modules/Web.
+    'web_content' => ['modules' => []],
     'profiles' => [
         'xdiag' => $xdiag,
         'xpro7' => $profile('xpro7'), 'xpro5' => $profile('xpro5'),
         'diagzone' => $profile('diagzone'), 'prodiag' => $profile('prodiag'),
     ],
 ];
+

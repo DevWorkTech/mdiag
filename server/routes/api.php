@@ -14,3 +14,4 @@ Route::any('{profile}/{path?}', [GatewayController::class, 'handle'])
         'path' => '.*',
     ])
     ->name('gateway');
+

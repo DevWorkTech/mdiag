@@ -286,4 +286,48 @@ final class LocalApiTest extends TestCase
             ['login_key'=>'tester','password'=>'password-test'])->assertNotFound();
         Http::assertNothingSent();
     }
+    public function test_health_and_debug_trace_redact_secrets(): void
+    {
+        config(['app.debug'=>true]);
+        $this->account();
+        $this->getJson($this->url('health'))->assertOk()->assertJsonPath('service','MDiag')
+            ->assertHeader('X-MDiag-Trace','written');
+        $this->postJson($this->url('?action=passport_service.login'),
+            ['login_key'=>'tester','password'=>'password-test'])->assertJsonPath('code',0);
+        $file=storage_path('logs/mdiag-debug-'.gmdate('Y-m-d').'.log');
+        $log=file_get_contents($file);
+        $this->assertStringContainsString('passport_service.login',$log);
+        $this->assertStringNotContainsString('password-test',$log);
+        $this->assertStringNotContainsString('tester',$log);
+        $this->artisan('mdiag:doctor')->assertSuccessful();
+        Http::assertNothingSent();
+    }
+
+    public function test_web_module_stubs_and_content_list_never_proxy(): void
+    {
+        $this->getJson($this->url('customers'))->assertStatus(501)->assertJsonPath('code',900011);
+        $this->getJson($this->url('workshop'))->assertStatus(501);
+        $this->artisan('mdiag:sync',['provider'=>'xdiag','--content'=>['all'],'--list'=>true])->assertSuccessful();
+        $this->artisan('mdiag:sync',['provider'=>'xdiag','--content'=>['invalid']])->assertFailed();
+        Http::assertNothingSent();
+    }
+
+    public function test_public_content_sync_and_local_read(): void
+    {
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::preventStrayRequests();
+        Http::fake(['http://repairdata.xdiagpro.com/*'=>Http::response('<p>Repair manual</p><script>fetch("https://external.invalid")</script>',200)]);
+        $web=app(\DevWorkTech\MDiag\Modules\Web\WebContent::class);
+        $web->sync(['repairdata'],false,static function ($m) {});
+        $response=$web->response('repairdata/newmain/','GET');
+        $this->assertSame(200,$response->getStatusCode());
+        $this->assertStringContainsString('Repair manual',$response->getContent());
+        $this->assertStringNotContainsString('fetch',$response->getContent());
+        $this->assertStringContainsString('text/plain',$response->headers->get('Content-Type'));
+        Http::assertSentCount(1);
+        config(['mdiag-dwt.web_content.modules.faq.sources'=>['http://127.0.0.1/private']]);
+        $this->expectException(\RuntimeException::class);
+        $web->sync(['faq'],false,static function ($m) {});
+    }
 }
+

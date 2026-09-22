@@ -18,6 +18,7 @@ final class SyncPackagesCommand extends Command
 {
     protected $signature = 'mdiag:sync
         {provider? : Профиль приложения; по умолчанию все включённые}
+        {--content=* : Только web-контент: repairdata, faq, customers, workshop или all}
         {--all : Скачать все найденные модули и версии без вопроса}
         {--module=* : Код модуля; параметр можно повторять}
         {--package-version=* : Номер версии; параметр можно повторять}
@@ -32,6 +33,14 @@ final class SyncPackagesCommand extends Command
 
     public function handle(RemotePackageSynchronizer $synchronizer): int
     {
+        if ($this->option('content') !== []) {
+            if (($this->argument('provider') ?? 'xdiag') !== 'xdiag') { $this->error('Web-модули доступны только для xdiag.'); return self::INVALID; }
+            try {
+                app(\DevWorkTech\MDiag\Modules\Web\WebContent::class)->sync((array)$this->option('content'),
+                    (bool)$this->option('list') || (bool)$this->option('dry-run'), fn ($m)=>$this->line($m));
+                return self::SUCCESS;
+            } catch (Throwable $e) { $this->error($e->getMessage()); return self::FAILURE; }
+        }
         $modules = $this->normalizedModules();
         $versions = $this->normalizedVersions();
         if ($this->option('latest') && $versions !== []) {
@@ -261,3 +270,4 @@ final class SyncPackagesCommand extends Command
             . ' ' . $units[$power];
     }
 }
+

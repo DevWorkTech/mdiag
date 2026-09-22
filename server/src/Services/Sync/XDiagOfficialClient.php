@@ -14,6 +14,7 @@ use SoapHeader;
 use SoapParam;
 use SoapVar;
 use Throwable;
+use DevWorkTech\MDiag\Services\Local\DebugTrace;
 
 /**
  * Клиент официальных сервисов X-DIAG: исходная ветка 7.00.004, вход/SOAP сверены с 7.00.014.
@@ -277,6 +278,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
                 $this->assertDownloadedFile($destination, $package);
                 return;
             } catch (Throwable $exception) {
+                DebugTrace::write('soap_error', ['method'=>$method,'class'=>get_class($exception)]);
                 $last = $exception;
             }
         }
@@ -535,6 +537,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
         $errors = [];
         foreach ($this->soapEndpoints($service) as $endpoint) {
             try {
+                DebugTrace::write('soap_outgoing', ['method'=>$method,'url'=>DebugTrace::url($endpoint)]);
                 $client = $this->soapClient($endpoint);
                 $signSource = '';
                 $arguments = [];
@@ -552,6 +555,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
                     false,
                 )]);
                 $result = $client->__soapCall($method, $arguments, ['soapaction' => '']);
+                DebugTrace::write('soap_received', ['method'=>$method]);
                 $decoded = $this->normalize($result);
                 if (is_array($decoded)) {
                     $code = $this->firstScalar($decoded, ['code', 'return.code']);
@@ -561,6 +565,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
                 }
                 return $result;
             } catch (Throwable $exception) {
+                DebugTrace::write('soap_error', ['method'=>$method,'class'=>get_class($exception)]);
                 $last = $exception;
                 $errors[] = $endpoint . ": " . $exception->getMessage();
             }
@@ -974,6 +979,9 @@ final class XDiagOfficialClient implements ProviderSyncClient
             'mdiag-dwt.connect_timeout',
             15,
         ))
+            ->beforeSending(static function ($request) {
+                DebugTrace::write('http_outgoing', ['method'=>$request->method(),'url'=>DebugTrace::url($request->url())]);
+            })
             ->timeout((int) $this->config->get('mdiag-dwt.request_timeout', 900))
             ->withOptions([
                 'cookies' => $this->cookies,
@@ -1139,3 +1147,4 @@ final class XDiagOfficialClient implements ProviderSyncClient
             . '/' . ltrim($location, '/');
     }
 }
+

@@ -53,7 +53,7 @@ def qualify_class_name(value: str, package_name: str) -> str:
     return value
 
 
-def patch_manifest(root: Path, new_package: str, label: str) -> tuple[str, int]:
+def patch_manifest(root: Path, new_package: str, label: str, cleartext: bool = False) -> tuple[str, int]:
     manifest_path = root / "AndroidManifest.xml"
     tree = ET.parse(manifest_path)
     manifest = tree.getroot()
@@ -99,7 +99,7 @@ def patch_manifest(root: Path, new_package: str, label: str) -> tuple[str, int]:
         raise RuntimeError("AndroidManifest.xml has no application element")
 
     application.set(android_attr("label"), label)
-    application.set(android_attr("usesCleartextTraffic"), "false")
+    application.set(android_attr("usesCleartextTraffic"), str(cleartext).lower())
     application.set(
         android_attr("networkSecurityConfig"),
         "@xml/mdiag_network_security_config",
@@ -160,7 +160,7 @@ def patch_resource_namespaces(
     return files_changed, replacements
 
 
-def write_network_security(root: Path, lan_host: str, ca_file: Path | None = None) -> None:
+def write_network_security(root: Path, lan_host: str, ca_file: Path | None = None, cleartext: bool = False) -> None:
     if not re.fullmatch(r"[A-Za-z0-9.-]+", lan_host):
         raise RuntimeError(f"Invalid LAN host: {lan_host!r}")
 
@@ -187,7 +187,7 @@ def write_network_security(root: Path, lan_host: str, ca_file: Path | None = Non
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="false">
+    <domain-config cleartextTrafficPermitted="{str(cleartext).lower()}">
         <domain includeSubdomains="false">{lan_host}</domain>
         <trust-anchors>
             <certificates src="system" />
@@ -236,7 +236,12 @@ def replace_xdiag_origins(text: str, old_base: str, new_base: str) -> tuple[str,
         re.IGNORECASE,
     )
     updated, legacy_count = legacy.subn(new_base.rstrip("/"), updated)
-    return updated, primary_count + config_count + legacy_count
+    # Web-сервисы xdiagpro сохраняют host-префикс, чтобы одинаковые пути не конфликтовали.
+    web = re.compile(r"https?://(?:(?P<sub>[a-z0-9-]+)\.)?xdiagpro\.com(?::\d+)?(?=/|[\"\s]|$)", re.IGNORECASE)
+    updated, web_count = web.subn(lambda m: new_base.rstrip("/") + "/" + (m.group("sub") or "portal"), updated)
+    # Строка разрешённых WebView-доменов в APK, не SOAP namespace.
+    updated = updated.replace(",diagnosticonline.xdiagpro.com,", "," + urlparse(new_base).hostname + ",")
+    return updated, primary_count + config_count + legacy_count + web_count
 
 
 def patch_text_files(
@@ -305,12 +310,13 @@ def main() -> int:
         root,
         args.new_package,
         args.label,
+        urlparse(args.new_base).scheme == "http",
     )
     namespace_files, namespace_replacements = patch_resource_namespaces(
         root,
         original_package,
     )
-    write_network_security(root, lan_host, args.ca_cert)
+    write_network_security(root, lan_host, args.ca_cert, urlparse(args.new_base).scheme == "http")
 
     endpoints, package_strings = patch_text_files(
         root,
@@ -329,7 +335,10 @@ def main() -> int:
         for item in config.get("data", {}).get("urls", []):
             parsed = urlparse(item["value"])
             if parsed.scheme in {"http", "https"}:
-                item["value"] = args.new_base.rstrip("/") + (parsed.path or "/") + (
+                web_prefix = ""
+                if parsed.hostname and (parsed.hostname == "xdiagpro.com" or parsed.hostname.endswith(".xdiagpro.com")):
+                    web_prefix = "/" + (parsed.hostname.removesuffix(".xdiagpro.com") if parsed.hostname != "xdiagpro.com" else "portal")
+                item["value"] = args.new_base.rstrip("/") + web_prefix + (parsed.path or "/") + (
                     "?" + parsed.query if parsed.query else "")
         bootstrap.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
 
@@ -352,3 +361,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

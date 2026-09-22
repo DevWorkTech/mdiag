@@ -24,7 +24,15 @@ final class GatewayController
         $provider = strtolower($profile);
         try {
             [$provider] = $profiles->byPrefix($provider);
+            if ($path === 'health' && $request->isMethod('GET')) {
+                return response()->json(['code'=>0,'service'=>'MDiag','profile'=>$provider])->header('Cache-Control','no-store');
+            }
+            if ($provider === 'xdiag') {
+                $web = app(\DevWorkTech\MDiag\Modules\Web\WebContent::class)->response(ltrim((string)$path, '/'), $request->method());
+                if ($web !== null) { return $web; }
+            }
             $parsed = $protocol->parse($request);
+            \DevWorkTech\MDiag\Services\Local\DebugTrace::write('dispatch', ['soap_method'=>$parsed['method']]);
             $action = (string) $request->input('action', '');
             if ($action === 'config_service.urls') { return $this->configuration($provider, $profiles); }
             if (in_array($action, ['passport_service.register', 'passport_service.reg_user'], true)) {
@@ -89,7 +97,8 @@ final class GatewayController
             return $response;
         } catch (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException) {
             return $errors->respond($provider, $parsed, new AccessDenied('unsupported'), $protocol);
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            \DevWorkTech\MDiag\Services\Local\DebugTrace::write('handler_error', ['class'=>get_class($exception),'file'=>basename($exception->getFile()),'line'=>$exception->getLine()]);
             if ($request->input('action') === 'passport_service.login') {
                 $this->recordLogin('internal_error');
             }
@@ -103,7 +112,7 @@ final class GatewayController
     /** Только время и причина: без логина, пароля, SN, токена и внешних логгеров. */
     private function recordLogin(string $result): void
     {
-        if (!(bool) config('mdiag-dwt.auth.diagnostic_log', false)) { return; }
+        if (!config('app.debug', false) && !(bool) config('mdiag-dwt.auth.diagnostic_log', false)) { return; }
         $line = gmdate('c') . ' login ' . preg_replace('/[^a-z_]/', '', $result) . PHP_EOL;
         // Ошибка записи диагностического файла не должна ломать вход.
         @file_put_contents(storage_path('logs/mdiag-auth.log'), $line, FILE_APPEND | LOCK_EX);
@@ -145,3 +154,4 @@ final class GatewayController
         return response()->json(['code' => 0, 'msg' => 'Учётная запись создана. Ожидайте разрешения администратора.']);
     }
 }
+

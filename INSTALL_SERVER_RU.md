@@ -354,3 +354,85 @@ tail -f storage/logs/mdiag-auth.log /var/log/nginx/mdiag-access.log
 сначала проверяйте DNS/подключение/TLS на планшете. Наличие HTTP-запроса к другому
 path не доказывает успешность login. После проверки выключите diagnostic_log.
 Файл содержит только время и причину, без идентификаторов и секретов.
+
+
+## Автоматические релизы APK/ZIP
+
+После успешного APK build на main workflow создаёт отдельный GitHub Release с тегом
+`mxdiag-7.00.014-<run>-<attempt>` и файлами `mX-DIAG-7.00.014.apk`,
+`mX-DIAG-7.00.014.zip`, SHA-256. ZIP содержит APK, контрольную сумму и отчёты сборки.
+Страница: https://github.com/DevWorkTech/mdiag/releases/latest .
+Release остаётся с видимостью репозитория. Нужны workflow permissions contents:write.
+Для установки обновлений поверх прежних сборок настройте постоянные signing secrets.
+
+## APP_DEBUG и проверка связи
+
+При `APP_DEBUG=true` каждый запрос, дошедший до маршрутов компонента, записывается в
+`storage/logs/mdiag-debug-YYYY-MM-DD.log`: request id, HTTP-метод, URL без query/секретов,
+известный action, SOAP method, статус, code, время. Ответ содержит X-MDiag-Request-Id,
+а X-MDiag-Trace=write-failed означает ошибку записи. Неизвестные команды видны в этом журнале.
+Логин дополнительно пишет mdiag-auth.log даже без auth.diagnostic_log.
+CLI пишет направления HTTP/SOAP; тела, подписи, токены, cookies, SN и пароли не журналируются.
+Это подробная диагностика протокола, не сырой дамп персональных данных.
+После проверки отключите APP_DEBUG; ежедневные файлы удаляйте согласно своей политике хранения.
+
+Из корня Laravel:
+```bash
+php artisan optimize:clear
+php artisan mdiag:doctor
+curl -k -i 'https://diag.devwork.local/xdiag/health'
+```
+На планшете откройте тот же `/xdiag/health` в браузере. Ожидается JSON с service=MDiag.
+Работа curl на сервере не доказывает работу DNS/маршрута/доверия на планшете.
+Если в Nginx нет запроса — проверяйте DNS, firewall, TLS. Если запрос есть, но нет X-MDiag-Request-Id,
+проверяйте virtual host, root, PHP-FPM, route cache и конфликтующие маршруты основного сайта.
+Doctor создаёт mdiag-auth.log явно; запускайте его от пользователя PHP-FPM для проверки прав:
+```bash
+sudo -u www-data php artisan mdiag:doctor
+```
+Используйте локальную учётную запись, созданную mdiag:user. Официальные credentials CLI не являются
+локальным логином. Отсутствие старого auth-лога само по себе не доказывает ошибку сертификата.
+
+## Необязательный HTTP-режим для изолированной LAN
+
+Если сертификат пока не удаётся установить, можно проверить связь без TLS:
+1. В опубликованном config/mdiag-dwt.php измените base_url на `http://` + ваш домен.
+   В новом шаблоне достаточно `$scheme = 'http';`. APP_URL основного проекта не меняйте.
+2. Вместо deploy/nginx-mdiag.conf используйте deploy/nginx-mdiag-http.conf, исправив root,
+   PHP-FPM socket и LAN-подсеть. Уберите прежний redirect с 80 для этого домена.
+3. Выполните nginx -t, reload nginx и php artisan optimize:clear.
+4. В Actions → Build mX-DIAG APK → Run workflow выберите lan_scheme=http и ваш lan_domain.
+5. Установите APK из этого релиза. Проверьте `http://diag.devwork.local/xdiag/health`.
+HTTP передаёт пароль без TLS; режим предназначен только для доверенной изолированной LAN.
+HTTPS по умолчанию сохраняется. Изменение одного сервера без пересборки APK не меняет адрес клиента.
+
+## Локальные web-разделы xdiagpro.com
+
+Patcher перенаправляет HTTP(S) URL xdiagpro.com и поддоменов в профиль:
+`repairdata.xdiagpro.com/newmain/` → `/xdiag/repairdata/newmain/`,
+`diagnosticonline.xdiagpro.com/...` → `/xdiag/diagnosticonline/...`.
+SOAP namespace не изменяется. Сторонние TCP/native подключения этим не гарантированно закрыты:
+запрет WAN на роутере остаётся необходимым. Замена URL не реализует сторонний серверный функционал.
+
+Модули находятся в `server/src/Modules/Web/`: RepairDataModule, FaqModule,
+CustomersModule, WorkshopModule. В PHP-файлах описано, что заполнить.
+RepairData/FAQ поддерживают публичные **текстовые** снимки; JS, изображения, поиск и формы сайта
+не эмулируются. Customers/Workshop — явные заготовки с 501, без фиктивных данных/успеха.
+Их фактические app paths/protocol ещё нужно подтвердить; пути customers/workshop — локальные точки расширения.
+
+Отдельный параметр не запускает синхронизацию автомобильных баз:
+```bash
+php artisan mdiag:sync xdiag --content=all --list
+php artisan mdiag:sync xdiag --content=repairdata
+php artisan mdiag:sync xdiag --content=faq
+```
+--content повторяется. --list/--dry-run не скачивают. Для FAQ задайте проверенный URL и
+точный локальный path в `web_content.modules.faq.sources/paths` конфига.
+Источники только xdiagpro.com/www/repairdata; редиректы автоматически не обходятся.
+Для приватных API нужен отдельный адаптер импорта с авторизованной сессией владельца;
+сканерные данные локальных пользователей в Интернет не отправляются.
+Снимки хранятся в storage/app/private/mdiag/web/<module>/<sha256>.txt, current.txt — текущий.
+Старые версии сохраняются. Маршруты читают только локальные файлы, HTTP proxy отсутствует.
+
+Карта всех ключей встроенной конфигурации и текущего покрытия: server/COMMAND_COVERAGE_RU.md.
+Она описывает известную таблицу URL, но не доказывает полноту всех динамических запросов APK.
