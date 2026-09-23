@@ -25,7 +25,7 @@ sudo systemctl reload nginx
 curl -fsS https://diag.devwork.tech/xdiag/health
 ```
 
-curl выполняется без -k: сертификат Let's Encrypt и цепочка должны проверяться. Проверьте DNS A/AAAA и доступность из сети планшета. Используйте новый APK под .ru; версия под .local сама адрес не изменит.
+curl выполняется без -k: сертификат Let's Encrypt и цепочка должны проверяться. Проверьте DNS A/AAAA и доступность из сети планшета. Используйте новый APK под diag.devwork.tech; версия под .local сама адрес не изменит.
 
 ## Web-синхронизация
 
