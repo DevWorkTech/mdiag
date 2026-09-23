@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 // Независим от APP_URL основного Laravel. Здесь только DNS-имя без схемы/пути.
 // Этим же значением ограничены routes и построение всех локальных URL.
-$domain = 'diag.devwork.ru';
+$domain = 'diag.devwork.tech';
 // http допустим для отдельной LAN-сборки без TLS; схема должна совпадать с APK/Nginx.
 $scheme = 'https';
 $profile = static fn (string $name, bool $enabled = false): array => [

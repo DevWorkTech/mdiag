@@ -13,16 +13,16 @@ mdiag:logout очищает сессию PHP-клиента без нового 
 Стандартный php artisan optimize:clear также удаляет сессию, так как вызывает очистку default cache. Он очищает и другой кеш Laravel — поведение самой команды не менялось.
 Для сохранения между CLI-процессами используйте существующий Redis/database/file cache, не array/null. APP_KEY должен оставаться постоянным.
 
-## Переход на diag.devwork.ru
+## Переход на diag.devwork.tech
 
-В уже опубликованном config/mdiag-dwt.php установите $domain = 'diag.devwork.ru'; $scheme = 'https'. APP_URL основного сайта менять не нужно.
-Обновите Nginx из deploy/nginx-mdiag.conf: сертификат /etc/letsencrypt/live/diag.devwork.ru/fullchain.pem, ключ privkey.pem. В примере убран прежний фильтр IP 192.168.88.0/24, мешающий проверке через интернет; ограничение Host и авторизация модуля остаются.
+В уже опубликованном config/mdiag-dwt.php установите $domain = 'diag.devwork.tech'; $scheme = 'https'. APP_URL основного сайта менять не нужно.
+Обновите Nginx из deploy/nginx-mdiag.conf: сертификат /etc/letsencrypt/live/diag.devwork.tech/fullchain.pem, ключ privkey.pem. В примере убран прежний фильтр IP 192.168.88.0/24, мешающий проверке через интернет; ограничение Host и авторизация модуля остаются.
 
 ```bash
 php artisan optimize:clear
 sudo nginx -t
 sudo systemctl reload nginx
-curl -I https://diag.devwork.ru/xdiag/health
+curl -fsS https://diag.devwork.tech/xdiag/health
 ```
 
 curl выполняется без -k: сертификат Let's Encrypt и цепочка должны проверяться. Проверьте DNS A/AAAA и доступность из сети планшета. Используйте новый APK под .ru; версия под .local сама адрес не изменит.
@@ -35,4 +35,4 @@ curl выполняется без -k: сертификат Let's Encrypt и ц�
 
 CookieJar соблюдает Domain/Path/Secure. Cookie services.x-diag.info не отправляется на xdiagpro.com. Подписанный URL или отдельный web-login нужно воспроизводить по реальному протоколу, а не добавлять token наугад. Переходы на ww38.repairdata.xdiagpro.com остаются отклонёнными. Успешный вход PHP не доказывает, что web-сессия уже выдана для другого домена. Если переход сохраняется, нужен рабочий URL/цепочка запросов раздела из авторизованного оригинального APK, без публикации значений секретов.
 
-Новая .ru сборка использует для Apache-клиента входа системное доверие Android и проверку hostname вместо BKS поставщика. Самоподписанный сертификат в этой сборке не принимается: установите полный сертификат Let's Encrypt. Другие стеки APK требуют отдельной проверки по logcat.
+Новая .tech сборка использует для Apache-клиента входа системное доверие Android и проверку hostname вместо BKS поставщика. Самоподписанный сертификат в этой сборке не принимается: установите полный сертификат Let's Encrypt. Другие стеки APK требуют отдельной проверки по logcat.

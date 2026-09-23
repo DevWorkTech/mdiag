@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-domain_name="${1:-diag.devwork.ru}"
+domain_name="${1:-diag.devwork.tech}"
 tls_dir="${2:-/etc/nginx/mdiag-tls}"
 
 if [[ ! "$domain_name" =~ ^[A-Za-z0-9.-]+$ ]]; then

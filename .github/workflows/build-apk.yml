@@ -7,7 +7,7 @@ on:
       lan_domain:
         description: Local DNS name used by the APK (no IP address)
         required: true
-        default: diag.devwork.ru
+        default: diag.devwork.tech
       lan_scheme:
         description: Transport (http needs matching LAN-only Nginx and PHP configuration)
         type: choice
@@ -54,7 +54,7 @@ jobs:
       OUTPUT_APK: mX-DIAG-7.00.014.apk
       PROFILE: xdiag
       LAN_SCHEME: ${{ github.event.inputs.lan_scheme || 'https' }}
-      LAN_HOST: ${{ github.event.inputs.lan_domain || 'diag.devwork.ru' }}
+      LAN_HOST: ${{ github.event.inputs.lan_domain || 'diag.devwork.tech' }}
 
     steps:
       - name: Checkout

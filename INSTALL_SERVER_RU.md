@@ -74,27 +74,40 @@ sudo chmod 640 .env
 Резерв используется только после ошибки основного входа. Без SN пропускается с объяснением.
 Локальные сканеры не подставляются в синхронизацию автоматически. SOAP не загружает WSDL.
 
-## 3. DNS, сертификат, Nginx
+## 3. DNS, сертификат Let's Encrypt, Nginx
 
-На роутере сопоставьте `diag.devwork.ru` текущему IP сервера. На клиенте проверьте `nslookup`.
-Из каталога Laravel:
+Рабочий домен сборки — `diag.devwork.tech`. В опубликованном `config/mdiag-dwt.php`
+установите `$domain = 'diag.devwork.tech';` и `$scheme = 'https';`.
+APP_URL основного Laravel оставьте прежним. На роутере можно направить домен
+на локальный IP; для проверки через интернет настройте публичный DNS A/AAAA и доступность сервера.
+
+Полученный сертификат должен находиться здесь:
+- /etc/letsencrypt/live/diag.devwork.tech/fullchain.pem
+- /etc/letsencrypt/live/diag.devwork.tech/privkey.pem
+
+Генератор create-local-tls.sh для этого варианта не используется, устанавливать
+самоподписанный CA на планшет не нужно. Из каталога Laravel:
 
 ```bash
-sudo bash packages/DevWorkTech/MDiagRepository/deploy/create-local-tls.sh diag.devwork.ru
 sudo cp packages/DevWorkTech/MDiagRepository/deploy/mdiag-log-format.conf /etc/nginx/conf.d/mdiag-log-format.conf
 sudo cp packages/DevWorkTech/MDiagRepository/deploy/nginx-mdiag.conf /etc/nginx/sites-available/mdiag.conf
-sudo ln -s /etc/nginx/sites-available/mdiag.conf /etc/nginx/sites-enabled/mdiag.conf
-sudo nginx -t && sudo systemctl reload nginx
-sudo systemctl enable --now php8.4-fpm
 ```
 
-Перед включением исправьте `root`, сокет PHP и клиентскую LAN-подсеть при необходимости.
-Удалите дублирующий server block того же домена, если он уже включён; другие сайты не изменяйте.
-Если сертификат уже существует, используйте его реальные пути — скрипт не перезаписывает ключи.
-Скопируйте только `/etc/nginx/mdiag-tls/mdiag-local-ca.crt` на планшет и установите CA.
-Никогда не копируйте приватные ключи. Для установленного локального CA сборка APK должна ему доверять.
+До включения исправьте root и сокет PHP под свой сервер. Уберите дубликат server block
+этого домена, сохраняя другие сайты. В новом примере нет прежнего allow 192.168.88.0/24;
+если вы оставили старый конфиг, этот фильтр может блокировать проверку через интернет.
 
-Смена IP требует только изменения DNS. Смена домена требует изменения конфига/Nginx/сертификата и сборки APK.
+```bash
+sudo ln -s /etc/nginx/sites-available/mdiag.conf /etc/nginx/sites-enabled/mdiag.conf
+php artisan optimize:clear
+sudo nginx -t
+sudo systemctl reload nginx
+curl -fsS https://diag.devwork.tech/xdiag/health
+```
+
+Если ссылка sites-enabled уже существует, повторять ln не нужно. curl используется
+без -k: проверяем реальное доверие сертификату. Смена IP требует только изменения DNS;
+смена домена требует конфига, Nginx, сертификата и новой сборки APK.
 
 ## 4. Локальные пользователи, подписки, сканеры
 
@@ -194,7 +207,7 @@ php artisan mdiag:package:add xdiag BENZ 50.95 /srv/import/BENZ.zip --serial=968
 ```bash
 php artisan route:list --name=mdiag-dwt
 php artisan list mdiag
-curl -k -I https://diag.devwork.ru/up
+curl -k -I https://diag.devwork.tech/up
 ```
 
 На планшете используйте локальный логин/пароль. Сначала проверьте вход, список сканеров,
@@ -302,36 +315,17 @@ CLI получает актуальные SOAP URL из `config_service.urls`. �
 рабочий адрес, требуется URL из сетевого запроса оригинального приложения. Без проверки
 на реальном аккаунте доступность закрытого сервиса подтвердить невозможно.
 
-## Локальный TLS и диагностика входа планшета
+## TLS и диагностика входа планшета
 
-`verify_tls=false` управляет только внешней CLI-синхронизацией. Эта настройка
-не отключает TLS-проверку в Android. Для mX-DIAG предусмотрены пользовательский
-CA и необязательный встроенный CA, доверие ограничено доменом сборки.
-
-Если Android пишет «не удаётся открыть сертификат», сначала проверьте сам файл
-и экспортируйте **существующий CA**, не генерируя новые ключи:
-```bash
-sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -noout -subject -dates -ext basicConstraints
-sudo openssl verify -CAfile /etc/nginx/mdiag-tls/mdiag-local-ca.crt /etc/nginx/mdiag-tls/diag.devwork.ru.crt
-sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -outform DER -out /tmp/mdiag-local-ca.cer
-sudo chmod 644 /tmp/mdiag-local-ca.cer
-```
-Передайте /tmp/mdiag-local-ca.cer на планшет как файл, сохраните в Downloads.
-Устанавливайте через настройки безопасности → установка сертификата → **сертификат CA**,
-а не «VPN/приложения» и не простым открытием вложения. Названия меню зависят от Android.
-Нужен CA с CA:TRUE, не серверный leaf-сертификат. Приватный ключ не передавайте.
-По одному сообщению Android причину сбоя импорта определить нельзя.
-
-Вариант без ручной установки: создайте GitHub Actions secret **MDIAG_CA_CERT_PEM**
-с полным содержимым публичного mdiag-local-ca.crt (BEGIN/END CERTIFICATE).
-Запустите Build mX-DIAG APK с вашим lan_domain. Сборка включает сертификат
-в res/raw, а domain-config доверяет ему только для этого имени. Без секрета
-сборка по-прежнему требует установленный CA. Системный/пользовательский TLS trust
-не гарантирует работу стороннего клиента с собственным TrustManager/pinning;
-это проверяется на устройстве. Проверка имени и срока сертификата сохраняется.
+`verify_tls=false` относится только к внешней PHP-синхронизации.
+APK под .tech использует LanTls.configureTrusted для Apache-клиента входа:
+системное доверие Android и проверку имени вместо встроенного BKS поставщика.
+Неизвестный самоподписанный сертификат отклоняется. Нужен fullchain Let's Encrypt
+для diag.devwork.tech; автоматическая установка локального CA не требуется.
+Другие сетевые стеки проверяются отдельно по logcat. Подробнее android/NETWORK_RU.md.
 
 Адреса SOAP планшет получает локально через:
-`https://diag.devwork.ru/xdiag/?action=config_service.urls`.
+`https://diag.devwork.tech/xdiag/?action=config_service.urls`.
 Bootstrap возвращает таблицу официальных ключей, но все URL ведут в локальный
 профиль. В APK также есть локальная assets/configurl.json как начальная таблица.
 Внешние зеркала CLI не должны попадать в ответы планшету. Прозрачное резервирование
@@ -380,7 +374,7 @@ CLI пишет направления HTTP/SOAP; тела, подписи, то�
 ```bash
 php artisan optimize:clear
 php artisan mdiag:doctor
-curl -k -i 'https://diag.devwork.ru/xdiag/health'
+curl -k -i 'https://diag.devwork.tech/xdiag/health'
 ```
 На планшете откройте тот же `/xdiag/health` в браузере. Ожидается JSON с service=MDiag.
 Работа curl на сервере не доказывает работу DNS/маршрута/доверия на планшете.
@@ -402,7 +396,7 @@ sudo -u www-data php artisan mdiag:doctor
    PHP-FPM socket и LAN-подсеть. Уберите прежний redirect с 80 для этого домена.
 3. Выполните nginx -t, reload nginx и php artisan optimize:clear.
 4. В Actions → Build mX-DIAG APK → Run workflow выберите lan_scheme=http и ваш lan_domain.
-5. Установите APK из этого релиза. Проверьте `http://diag.devwork.ru/xdiag/health`.
+5. Установите APK из этого релиза. Проверьте `http://diag.devwork.tech/xdiag/health`.
 HTTP передаёт пароль без TLS; режим предназначен только для доверенной изолированной LAN.
 HTTPS по умолчанию сохраняется. Изменение одного сервера без пересборки APK не меняет адрес клиента.
 
@@ -440,3 +434,18 @@ php artisan mdiag:sync xdiag --content=faq
 
 Карта всех ключей встроенной конфигурации и текущего покрытия: server/COMMAND_COVERAGE_RU.md.
 Она описывает известную таблицу URL, но не доказывает полноту всех динамических запросов APK.
+
+## Кеш официальной сессии PHP
+
+Успешный вход сохраняет cookies/token зашифрованными в default cache Laravel на
+7200 секунд (official_session_ttl). Следующая команда использует ту же сессию.
+Смена пароля, истечение кеша или явный выход требуют нового login.
+
+```bash
+php artisan mdiag:logout xdiag
+php artisan mdiag:sync xdiag --content=repairdata
+```
+
+optimize:clear тоже удаляет кешированную сессию; локальных пользователей и их БД
+команда mdiag:logout не изменяет. Для постоянного кеша нужен Redis/database/file,
+не array/null. Протокол web-сессии и ограничения: server/OFFICIAL_SESSION_RU.md.

@@ -7,8 +7,9 @@ import javax.net.ssl.*;
 
 /**
  * Адаптер Apache HttpClient из X-DIAG 7.00.014.
- * Встроенный BKS остаётся для внешних хостов. Только точное имя LAN использует
- * TLS без проверки цепочки/имени сертификата, по настройке владельца LAN.
+ * Встроенный BKS остаётся для внешних хостов. Рабочая configureTrusted использует
+ * системное доверие и проверку hostname для LAN. Режим без проверки цепочки
+ * configure сохранён только для тестирования прежнего поведения.
  * Reflection сохраняет независимость исходника от обфускации остального APK;
  * наличие точных Apache сигнатур дополнительно проверяет patch_mdiag.py.
  */
@@ -23,7 +24,7 @@ public final class LanTls {
     /** Совместимость с прежним диагностическим тестом для самоподписанного LAN. */
     public static void configure(Object builder, SSLContext original) { configureMode(builder,original,true); }
 
-    /** Рабочая сборка .ru: системное доверие Android и проверка hostname для Let's Encrypt. */
+    /** Рабочая сборка .tech: системное доверие Android и проверка hostname для Let's Encrypt. */
     public static void configureTrusted(Object builder, SSLContext original) { configureMode(builder,original,false); }
 
     private static void configureMode(Object builder, SSLContext original, boolean insecure) {
