@@ -1,46 +1,41 @@
-# Сетевой патч 7.00.014
+# Сеть mX-DIAG 7.00.014
 
-Источник сборки: https://testnet-faucet.devwork.tech/X-DIAG_V7.00.014.apk.
-SHA-256 сверяется с закреплённым исходником; несовпадение останавливает сборку.
+Проверки ConnectivityManager и ping восстановлены из исходного APK. Патч больше
+не меняет методы проверки сети и не привязывает процесс к Wi-Fi/Ethernet.
+Адреса Google/Baidu/QQ/Apple диагностического экрана сохранены. Проверка доступности
+сети самой ОС зависит от прошивки Android; её адреса определяются на роутере.
 
-В реальном APK проверены два метода: AndroidContextUtil `com/xdiagpro/g/a/d/a.u()`
-и `com/xdiagpro/i/a/a/b.a(Context)`. Они проверяли только активную сеть Android.
-Если Wi-Fi без WAN не является активной сетью, проверка могла вернуть false до HTTP.
-Это выявленный сценарий отказа, а не подтверждённая причина ошибки конкретного планшета.
+Источник APK: https://testnet-faucet.devwork.tech/X-DIAG_V7.00.014.apk.
+В CI проверяется закреплённый SHA-256 исходного файла. Bootstrap и известные
+HTTP API домены/IP заменяются на локальный профиль /xdiag. Голые SOAP namespace
+не являются адресами запросов и сохраняются. Статический аудит не доказывает
+перенаправление динамических URL, native-библиотек и сохранённых настроек.
 
-Теперь оба метода вызывают LanNetwork.connected(Context): на Android 5+ ищется
-подключённый Wi-Fi/Ethernet среди getAllNetworks, процесс привязывается к найденной
-сети. Требования INTERNET/VALIDATED нет. При отсутствии такого интерфейса сохраняется
-проверка активного подключения; принудительного return true нет. На Android <5
-сохраняется прежняя проверка. Выбирается первый подходящий интерфейс: при нескольких
-LAN/VPN подключениях проверьте маршрутизацию отдельно. Это не заменяет DNS и TLS.
+## Вход не виден в Laravel
 
-Изменены IP endpoints с путями /services/, /uc/services/, /diagdevice/ и путями
-загрузки. Порты старого upstream не добавляются к локальному пути. Голый SOAP namespace
-https://79.174.70.97 сохранён. Ping в CheckServerFragment направлен на локальный домен;
-запрет ICMP на сервере может всё равно дать ошибку этого диагностического экрана.
+Repairdata использует WebView; авторизация использует другой HTTP-клиент.
+Открытие WebView не подтверждает TLS/hostname verification в клиенте входа.
+network_security_config с пользовательским CA сам по себе не исправляет все
+сторонние SSLContext/Apache HttpClient. CI сохраняет методы создания TLS-клиентов
+в network-before.json / network-after.json для проверки реальной версии APK.
 
-Все адреса assets/configurl.json проверяются на совпадение с доменом сборки.
-network-before.json и network-after.json сохраняются в Actions artifact.
-Они показывают статические URL и методы подключения, а не реальные сетевые обращения.
-В сторонних SDK остаются внешние строки; native-код, сохранённые настройки и
-составляемые во время выполнения адреса требуют трассировки на устройстве.
-Утверждать, что 100% трафика перенаправлено, по этому аудиту нельзя. Для строгой
-изоляции запретите планшету WAN на роутере (IPv4/IPv6), сохранив локальный DNS/сервер.
-
-Проверка установленного нового APK через ADB:
+Сопоставьте время нажатия «Вход» в следующих журналах:
 
 ```bash
-adb logcat -v time -s MDiagNetwork AndroidRuntime
+sudo tail -f /var/log/nginx/mdiag-access.log /var/log/nginx/mdiag-error.log
+sudo -u www-data php artisan mdiag:doctor
+adb logcat -v time | grep -Ei 'SSLHandshake|SSLPeer|CertPath|UnknownHost|ConnectException|SocketTimeout|Cleartext|AndroidRuntime'
 ```
 
-Ожидаемая строка: Process bound to connected LAN WiFi/Ethernet.
-Если bind не выполнен, будет Cannot select LAN network с причиной Android.
-Успешный bind не означает успешный TLS. Для этой проверки откройте на планшете
-https://diag.devwork.local/xdiag/health и сравните с журналом Nginx.
-Если HTTPS доверие ещё не настроено, используйте документированный HTTP LAN-режим
-с одинаковой схемой в APK, PHP base_url и Nginx; не меняйте только одну сторону.
+Не публикуйте полный logcat: оригинальный клиент может записывать пароли/токены
+в собственные журналы. Присылайте только исключение, хост и время без данных входа.
+Если Nginx не видит запроса, изменение локального пароля или JSON-ответа Laravel
+не исправит этот этап. При HTTP в access.log смотрите статус, затем MDiag trace.
+APP_DEBUG=true включает storage/logs/mdiag-debug-YYYY-MM-DD.log; после изменения
+настроек выполните php artisan optimize:clear. Отсутствие mdiag-auth.log не доказывает
+отсутствие TCP/TLS: этот файл относится к обработанному входу.
 
-Старый mdiag-auth.log — только логин. APP_DEBUG=true включает также
-storage/logs/mdiag-debug-YYYY-MM-DD.log для всех маршрутов модуля. После смены env
-нужен php artisan optimize:clear. mdiag:doctor запускайте от пользователя PHP-FPM.
+Для изоляции TLS предусмотрена сборка workflow_dispatch с lan_scheme=http.
+Ей должны соответствовать HTTP Nginx и scheme=http в config/mdiag-dwt.php.
+Нельзя менять схему только с одной стороны. Постоянный HTTPS требует корректного
+сертификата для домена и доверия используемого сетевого клиента.

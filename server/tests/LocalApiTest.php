@@ -316,18 +316,52 @@ final class LocalApiTest extends TestCase
     {
         Http::swap(new \Illuminate\Http\Client\Factory());
         Http::preventStrayRequests();
-        Http::fake(['http://repairdata.xdiagpro.com/*'=>Http::response('<p>Repair manual</p><script>fetch("https://external.invalid")</script>',200)]);
+        Http::fake([
+            'http://repairdata.xdiagpro.com/newmain/?source=app'=>Http::response('',302,['Location'=>'https://repairdata.xdiagpro.com/newmain/']),
+            'https://repairdata.xdiagpro.com/newmain/'=>Http::response('<html><head><link rel="stylesheet" href="/styles.css"></head><body><p>Repair manual</p><img src="img.png"></body></html>',200,['Content-Type'=>'text/html']),
+            'https://repairdata.xdiagpro.com/styles.css'=>Http::response('body{color:red}',200,['Content-Type'=>'text/css']),
+            'https://repairdata.xdiagpro.com/newmain/img.png'=>Http::response('image',200,['Content-Type'=>'image/png']),
+        ]);
         $web=app(\DevWorkTech\MDiag\Modules\Web\WebContent::class);
         $web->sync(['repairdata'],false,static function ($m) {});
         $response=$web->response('repairdata/newmain/','GET');
         $this->assertSame(200,$response->getStatusCode());
         $this->assertStringContainsString('Repair manual',$response->getContent());
-        $this->assertStringNotContainsString('fetch',$response->getContent());
-        $this->assertStringContainsString('text/plain',$response->headers->get('Content-Type'));
-        Http::assertSentCount(1);
+        $this->assertStringContainsString('/xdiag/repairdata/styles.css',$response->getContent());
+        $this->assertStringContainsString('text/html',$response->headers->get('Content-Type'));
+        $this->assertSame('body{color:red}',$web->response('repairdata/styles.css','GET')->getContent());
+        $this->assertSame(404,$web->response('repairdata/not-cached','GET')->getStatusCode());
+        Http::assertSentCount(4);
         config(['mdiag-dwt.web_content.modules.faq.sources'=>['http://127.0.0.1/private']]);
         $this->expectException(\RuntimeException::class);
         $web->sync(['faq'],false,static function ($m) {});
     }
+    public function test_web_redirect_outside_source_is_not_requested(): void
+    {
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::preventStrayRequests();
+        Http::fake(['http://repairdata.xdiagpro.com/*'=>Http::response('',302,['Location'=>'http://127.0.0.1/private'])]);
+        try {
+            app(\DevWorkTech\MDiag\Modules\Web\WebContent::class)->sync(['repairdata'],false,static function ($m) {});
+            $this->fail('Unsafe redirect accepted');
+        } catch (\RuntimeException $e) { $this->assertStringContainsString('redirect',$e->getMessage()); }
+        Http::assertSentCount(1);
+    }
+
+    public function test_parked_source_does_not_replace_existing_snapshot(): void
+    {
+        $dir=storage_path('app/private/mdiag/web/repairdata');
+        if (!is_dir($dir)) { mkdir($dir,0770,true); }
+        file_put_contents($dir.'/current.json','previous-snapshot');
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::preventStrayRequests();
+        Http::fake(['http://repairdata.xdiagpro.com/*'=>Http::response('<html>This domain may be for sale.</html>',200,['Content-Type'=>'text/html'])]);
+        try {
+            app(\DevWorkTech\MDiag\Modules\Web\WebContent::class)->sync(['repairdata'],false,static function ($m) {});
+            $this->fail('Parked page accepted');
+        } catch (\RuntimeException $e) { $this->assertStringContainsString('парковочную',$e->getMessage()); }
+        $this->assertSame('previous-snapshot',file_get_contents($dir.'/current.json'));
+    }
+
 }
 
