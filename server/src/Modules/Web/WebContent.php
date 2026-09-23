@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 namespace DevWorkTech\MDiag\Modules\Web;
-use Illuminate\Support\Facades\Http;
 use DevWorkTech\MDiag\Services\Local\DebugTrace;
 use RuntimeException;
 

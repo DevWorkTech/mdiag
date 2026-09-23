@@ -292,6 +292,40 @@ def patch_text_files(
     return endpoint_changes, package_string_changes
 
 
+def patch_apache_lan_tls(root: Path, lan_host: str) -> None:
+    """Точное место 7.00.014: Apache-клиент входа использует свой BKS, не WebView CA."""
+    def source(suffix: str) -> Path:
+        matches = [d / suffix for d in root.glob('smali*') if (d / suffix).is_file()]
+        if len(matches) != 1:
+            raise RuntimeError('Expected one Apache TLS class: ' + suffix)
+        return matches[0]
+
+    factory = source('org/apache/http/conn/ssl/SSLConnectionSocketFactory.smali').read_text()
+    for signature in ('<init>(Ljavax/net/ssl/SSLContext;)V',
+                      '<init>(Ljavax/net/ssl/SSLContext;Lorg/apache/http/conn/ssl/X509HostnameVerifier;)V'):
+        if signature not in factory:
+            raise RuntimeError('Unsupported Apache TLS constructor: ' + signature)
+    builder = source('org/apache/http/impl/client/HttpClientBuilder.smali').read_text()
+    if 'setSSLSocketFactory(Lorg/apache/http/conn/socket/LayeredConnectionSocketFactory;)' not in builder:
+        raise RuntimeError('Unsupported Apache builder factory signature')
+    client = source('com/xdiagpro/framework/network/http/AsyncHttpClient.smali')
+    text = client.read_text()
+    instruction = ('    invoke-virtual {v0, v1}, Lorg/apache/http/impl/client/HttpClientBuilder;'
+                   '->setSslcontext(Ljavax/net/ssl/SSLContext;)Lorg/apache/http/impl/client/HttpClientBuilder;')
+    if text.count(instruction) != 1:
+        raise RuntimeError('Unrecognized AsyncHttpClient TLS initialization')
+    hook = ('    invoke-static {v0, v1}, Ltech/devwork/mdiag/LanTls;'
+            '->configure(Ljava/lang/Object;Ljavax/net/ssl/SSLContext;)V\n\n')
+    client.write_text(text.replace(instruction, hook + instruction))
+    helper = source('tech/devwork/mdiag/LanTls.smali')
+    contents = helper.read_text()
+    if '__MDIAG_LAN_HOST__' not in contents:
+        raise RuntimeError('LAN TLS helper host placeholder missing')
+    for part in helper.parent.glob('LanTls*.smali'):
+        part.write_text(part.read_text().replace('__MDIAG_LAN_HOST__', lan_host))
+    print('Apache TLS: local-host-only certificate exception installed; original external BKS retained')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=Path)
@@ -320,6 +354,7 @@ def main() -> int:
         original_package,
     )
     write_network_security(root, lan_host, args.ca_cert, urlparse(args.new_base).scheme == "http")
+    patch_apache_lan_tls(root, lan_host)
 
     endpoints, package_strings = patch_text_files(
         root,

@@ -15,16 +15,26 @@ HTTP API домены/IP заменяются на локальный профи
 
 Repairdata использует WebView; авторизация использует другой HTTP-клиент.
 Открытие WebView не подтверждает TLS/hostname verification в клиенте входа.
-network_security_config с пользовательским CA сам по себе не исправляет все
-сторонние SSLContext/Apache HttpClient. CI сохраняет методы создания TLS-клиентов
-в network-before.json / network-after.json для проверки реальной версии APK.
+В APK 7.00.014 подтверждено: AsyncHttpClient создаёт SSLContext из встроенного BKS
+поставщика. Это обходило CA из network_security_config. LanTls перенастраивает
+именно этот Apache-клиент: для точного локального домена допускается локальный
+сертификат без проверки цепочки и имени, как запрошено владельцем LAN. Для других
+хостов остаётся исходный BKS и проверка имени. Проверки доступности сети не меняются.
+Это режим доверенной LAN: TLS шифрует трафик, но не удостоверяет локальный сервер.
+
+CI проверяет реальный handshake с самоподписанным сертификатом и неверным CN:
+LAN-host проходит, другой hostname отклоняется. Затем проверяются сигнатуры Apache
+в самом APK, helper компилируется в DEX и добавляется в основной smali.
+Это не заменяет проверку на планшете. Другие HTTP-стеки APK этим адаптером не меняются.
+В logcat строки MDiagTLS показывают установку адаптера, попытку подключения и класс
+ошибки, без пароля/токена. CI сохраняет TLS-методы в network-before/after.json.
 
 Сопоставьте время нажатия «Вход» в следующих журналах:
 
 ```bash
 sudo tail -f /var/log/nginx/mdiag-access.log /var/log/nginx/mdiag-error.log
 sudo -u www-data php artisan mdiag:doctor
-adb logcat -v time | grep -Ei 'SSLHandshake|SSLPeer|CertPath|UnknownHost|ConnectException|SocketTimeout|Cleartext|AndroidRuntime'
+adb logcat -v time | grep -Ei 'MDiagTLS|SSLHandshake|SSLPeer|CertPath|UnknownHost|ConnectException|SocketTimeout|Cleartext|AndroidRuntime'
 ```
 
 Не публикуйте полный logcat: оригинальный клиент может записывать пароли/токены

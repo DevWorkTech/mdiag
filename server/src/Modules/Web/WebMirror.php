@@ -61,7 +61,7 @@ final class WebMirror
             if (isset($seen[$url])) { throw new RuntimeException('Web: цикл перенаправлений.'); }
             $seen[$url] = true;
             DebugTrace::write('content_outgoing', ['url'=>DebugTrace::url($url)]);
-            $r = Http::connectTimeout(10)->timeout(40)->withOptions(['allow_redirects'=>false,'stream'=>true])->get($url);
+            $r = Http::connectTimeout(10)->timeout(40)->withOptions(['allow_redirects'=>false,'stream'=>true,'verify'=>(bool)config('mdiag-dwt.verify_tls',false)])->get($url);
             $stream = $r->toPsrResponse()->getBody();
             if (in_array($r->status(), [301,302,303,307,308], true)) {
                 $stream->close();

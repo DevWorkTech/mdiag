@@ -69,6 +69,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Test LAN TLS scope with real handshakes
+        run: |
+          mkdir -p tls-test/lib tls-test/src tls-test/classes
+          curl -fL --retry 2 -o tls-test/lib/httpclient.jar https://repo.maven.apache.org/maven2/org/apache/httpcomponents/httpclient/4.3.5/httpclient-4.3.5.jar
+          curl -fL --retry 2 -o tls-test/lib/httpcore.jar https://repo.maven.apache.org/maven2/org/apache/httpcomponents/httpcore/4.3.2/httpcore-4.3.2.jar
+          curl -fL --retry 2 -o tls-test/lib/logging.jar https://repo.maven.apache.org/maven2/commons-logging/commons-logging/1.1.3/commons-logging-1.1.3.jar
+          curl -fL --retry 2 -o tls-test/lib/codec.jar https://repo.maven.apache.org/maven2/commons-codec/commons-codec/1.6/commons-codec-1.6.jar
+          sed 's/__MDIAG_LAN_HOST__/localhost/g' android/LanTls.java > tls-test/src/LanTls.java
+          javac -cp 'tls-test/lib/*' -d tls-test/classes tls-test/src/LanTls.java android/tests/LanTlsTest.java
+          keytool -genkeypair -noprompt -storetype JKS -keystore tls-test/server.jks -storepass local-test -keypass local-test -alias server -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=intentionally-wrong.invalid'
+          timeout 30 java -cp 'tls-test/classes:tls-test/lib/*' tech.devwork.mdiag.LanTlsTest tls-test/server.jks
+
       - name: Install Android build tools
         run: |
           ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
@@ -114,6 +126,18 @@ jobs:
 
       - name: Decode APK
         run: java -jar apktool.jar d --force "$SOURCE_APK" --output decoded
+
+      - name: Compile LAN TLS adapter
+        run: |
+          mkdir -p tls-classes tls-dex tls-apk
+          javac --release 8 -d tls-classes android/LanTls.java
+          jar cf tls-helper.jar -C tls-classes .
+          "$ANDROID_HOME/build-tools/35.0.0/d8" --min-api 19 --output tls-dex tls-helper.jar
+          cp tls-dex/classes.dex tls-apk/classes.dex
+          unzip -p "$SOURCE_APK" AndroidManifest.xml > tls-apk/AndroidManifest.xml
+          zip -j tls-helper.apk tls-apk/AndroidManifest.xml tls-apk/classes.dex
+          java -jar apktool.jar d --no-res --force tls-helper.apk --output tls-decoded
+          cp -R tls-decoded/smali/tech decoded/smali/
 
       - name: Audit source network code
         run: python3 android/audit_network.py decoded --output network-before.json
