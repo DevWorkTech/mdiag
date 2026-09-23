@@ -27,7 +27,7 @@ final class LocalApiTest extends TestCase
         Http::preventStrayRequests();
         Http::fake(fn () => throw new \RuntimeException('LOCAL API ATTEMPTED EGRESS'));
     }
-    private function url(string $suffix = ''): string { return 'https://diag.devwork.local/xdiag/' . $suffix; }
+    private function url(string $suffix = ''): string { return 'https://diag.devwork.ru/xdiag/' . $suffix; }
     private function account(): LocalUser
     {
         return LocalUser::create(['provider'=>'xdiag','login'=>'tester','password'=>Hash::make('password-test'),
@@ -50,7 +50,7 @@ final class LocalApiTest extends TestCase
     public function test_unknown_routes_never_proxy_and_bootstrap_has_only_local_urls(): void
     {
         $urls=$this->getJson($this->url('?action=config_service.urls'))->assertOk()->json('data.urls');
-        foreach($urls as $u){$this->assertSame('diag.devwork.local',parse_url($u['value'],PHP_URL_HOST));}
+        foreach($urls as $u){$this->assertSame('diag.devwork.ru',parse_url($u['value'],PHP_URL_HOST));}
         $this->account();$token=$this->login();
         $this->withToken($token)->postJson($this->url('unknown.php'),['serialNo'=>'DO-NOT-SEND'])
             ->assertJsonPath('code',900008);
@@ -145,7 +145,7 @@ final class LocalApiTest extends TestCase
         $this->assertCount(1,$rows);
         $this->assertSame('BENZ',$rows[0]['softPackageId']);
         $this->assertSame('1',$rows[0]['versionNo']);
-        $this->assertSame('diag.devwork.local',parse_url($rows[0]['url'],PHP_URL_HOST));
+        $this->assertSame('diag.devwork.ru',parse_url($rows[0]['url'],PHP_URL_HOST));
         unlink($root.'/test.zip');
         $this->assertSame([],$catalog->versions($u,$scanner,'diagnostic',true,[],'local-test-token'));
         Http::assertNothingSent();
@@ -280,7 +280,7 @@ final class LocalApiTest extends TestCase
         $byKey=array_column($urls,'value','key');
         foreach (['login','config.urls','productservice.*','xdigpaddiagsoftservice.*','xdigpadpublicsoftservice.*'] as $key) {
             $this->assertArrayHasKey($key,$byKey);
-            $this->assertStringStartsWith('https://diag.devwork.local/xdiag/',$byKey[$key]);
+            $this->assertStringStartsWith('https://diag.devwork.ru/xdiag/',$byKey[$key]);
         }
         $this->post('https://main.example.test/xdiag/?action=passport_service.login',
             ['login_key'=>'tester','password'=>'password-test'])->assertNotFound();

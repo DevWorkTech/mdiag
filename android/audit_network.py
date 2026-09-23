@@ -30,7 +30,7 @@ for file in args.decoded.rglob('*'):
                 references.append({'file': relative, 'url': url})
     if file.suffix == '.smali' and '/com/xdiagpro/' in relative:
         for method in re.findall(r'(?ms)^\.method .*?^\.end method', text):
-            if any(x in method for x in ('getActiveNetwork', 'hasCapability(I)', 'isConnected()Z', 'isAvailable()Z', 'getAllNetworks', 'www.google.com', 'www.baidu', 'getSslContext', 'HostnameVerifier', 'SSLContext;->', 'passport_service.login', 'SSLSocketFactory;->', 'config_service.urls')):
+            if any(x in method for x in ('getActiveNetwork', 'hasCapability(I)', 'isConnected()Z', 'isAvailable()Z', 'getAllNetworks', 'www.google.com', 'www.baidu', 'getSslContext', 'HostnameVerifier', 'SSLContext;->', 'passport_service.login', 'SSLSocketFactory;->', 'config_service.urls', 'repairdata', 'newmain', 'CookieManager;', 'setCookie(', 'passport_service.logout', '->loadUrl(')):
                 checks.append({'file': relative, 'method': method})
 report = {'hosts': dict(hosts.most_common()), 'references': references, 'network_checks': checks,
           'limitations': 'Native libraries, composed URLs, DNS/TCP and runtime-loaded code require device/network tracing.'}

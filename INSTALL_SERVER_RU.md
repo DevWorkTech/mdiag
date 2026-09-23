@@ -76,11 +76,11 @@ sudo chmod 640 .env
 
 ## 3. DNS, сертификат, Nginx
 
-На роутере сопоставьте `diag.devwork.local` текущему IP сервера. На клиенте проверьте `nslookup`.
+На роутере сопоставьте `diag.devwork.ru` текущему IP сервера. На клиенте проверьте `nslookup`.
 Из каталога Laravel:
 
 ```bash
-sudo bash packages/DevWorkTech/MDiagRepository/deploy/create-local-tls.sh diag.devwork.local
+sudo bash packages/DevWorkTech/MDiagRepository/deploy/create-local-tls.sh diag.devwork.ru
 sudo cp packages/DevWorkTech/MDiagRepository/deploy/mdiag-log-format.conf /etc/nginx/conf.d/mdiag-log-format.conf
 sudo cp packages/DevWorkTech/MDiagRepository/deploy/nginx-mdiag.conf /etc/nginx/sites-available/mdiag.conf
 sudo ln -s /etc/nginx/sites-available/mdiag.conf /etc/nginx/sites-enabled/mdiag.conf
@@ -194,7 +194,7 @@ php artisan mdiag:package:add xdiag BENZ 50.95 /srv/import/BENZ.zip --serial=968
 ```bash
 php artisan route:list --name=mdiag-dwt
 php artisan list mdiag
-curl -k -I https://diag.devwork.local/up
+curl -k -I https://diag.devwork.ru/up
 ```
 
 На планшете используйте локальный логин/пароль. Сначала проверьте вход, список сканеров,
@@ -312,7 +312,7 @@ CA и необязательный встроенный CA, доверие ог�
 и экспортируйте **существующий CA**, не генерируя новые ключи:
 ```bash
 sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -noout -subject -dates -ext basicConstraints
-sudo openssl verify -CAfile /etc/nginx/mdiag-tls/mdiag-local-ca.crt /etc/nginx/mdiag-tls/diag.devwork.local.crt
+sudo openssl verify -CAfile /etc/nginx/mdiag-tls/mdiag-local-ca.crt /etc/nginx/mdiag-tls/diag.devwork.ru.crt
 sudo openssl x509 -in /etc/nginx/mdiag-tls/mdiag-local-ca.crt -outform DER -out /tmp/mdiag-local-ca.cer
 sudo chmod 644 /tmp/mdiag-local-ca.cer
 ```
@@ -331,7 +331,7 @@ sudo chmod 644 /tmp/mdiag-local-ca.cer
 это проверяется на устройстве. Проверка имени и срока сертификата сохраняется.
 
 Адреса SOAP планшет получает локально через:
-`https://diag.devwork.local/xdiag/?action=config_service.urls`.
+`https://diag.devwork.ru/xdiag/?action=config_service.urls`.
 Bootstrap возвращает таблицу официальных ключей, но все URL ведут в локальный
 профиль. В APK также есть локальная assets/configurl.json как начальная таблица.
 Внешние зеркала CLI не должны попадать в ответы планшету. Прозрачное резервирование
@@ -380,7 +380,7 @@ CLI пишет направления HTTP/SOAP; тела, подписи, то�
 ```bash
 php artisan optimize:clear
 php artisan mdiag:doctor
-curl -k -i 'https://diag.devwork.local/xdiag/health'
+curl -k -i 'https://diag.devwork.ru/xdiag/health'
 ```
 На планшете откройте тот же `/xdiag/health` в браузере. Ожидается JSON с service=MDiag.
 Работа curl на сервере не доказывает работу DNS/маршрута/доверия на планшете.
@@ -402,7 +402,7 @@ sudo -u www-data php artisan mdiag:doctor
    PHP-FPM socket и LAN-подсеть. Уберите прежний redirect с 80 для этого домена.
 3. Выполните nginx -t, reload nginx и php artisan optimize:clear.
 4. В Actions → Build mX-DIAG APK → Run workflow выберите lan_scheme=http и ваш lan_domain.
-5. Установите APK из этого релиза. Проверьте `http://diag.devwork.local/xdiag/health`.
+5. Установите APK из этого релиза. Проверьте `http://diag.devwork.ru/xdiag/health`.
 HTTP передаёт пароль без TLS; режим предназначен только для доверенной изолированной LAN.
 HTTPS по умолчанию сохраняется. Изменение одного сервера без пересборки APK не меняет адрес клиента.
 
