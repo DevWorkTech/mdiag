@@ -3,11 +3,9 @@
 declare(strict_types=1);
 namespace DevWorkTech\MDiag\Http\Controllers;
 
-use DevWorkTech\MDiag\Models\LocalUser;
 use DevWorkTech\MDiag\Services\ProfileRegistry;
-use DevWorkTech\MDiag\Services\Local\{AccessDenied, ErrorCatalog, LocalAuth, LocalCatalog, Protocol};
+use DevWorkTech\MDiag\Services\Local\{AccessDenied, ErrorCatalog, LocalAuth, LocalCatalog, Protocol, PassportApi, BootstrapApi, DebugTrace};
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\{Hash, RateLimiter};
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -24,8 +22,8 @@ final class GatewayController
         $provider = strtolower($profile);
         try {
             [$provider] = $profiles->byPrefix($provider);
-            if ($path === 'health' && $request->isMethod('GET')) {
-                return response()->json(['code'=>0,'service'=>'MDiag','profile'=>$provider])->header('Cache-Control','no-store');
+            if ($path === 'health' && in_array($request->method(), ['GET','HEAD'], true)) {
+                return response()->json(['code'=>0,'service'=>'MDiag','profile'=>$provider,'protocol'=>'7.00.014','revision'=>'transport2'])->header('Cache-Control','no-store');
             }
             if ($provider === 'xdiag') {
                 $web = app(\DevWorkTech\MDiag\Modules\Web\WebContent::class)->response(ltrim((string)$path, '/'), $request->method());
@@ -33,29 +31,18 @@ final class GatewayController
             }
             $parsed = $protocol->parse($request);
             \DevWorkTech\MDiag\Services\Local\DebugTrace::write('dispatch', ['soap_method'=>$parsed['method']]);
-            $action = (string) $request->input('action', '');
-            if ($action === 'config_service.urls') { return $this->configuration($provider, $profiles); }
+            $action = trim((string) $request->input('action', ''));
+            $passport = app(PassportApi::class);
+            if ($action === 'config_service.urls') { return app(BootstrapApi::class)->configuration($provider, $profiles); }
             if (in_array($action, ['passport_service.register', 'passport_service.reg_user'], true)) {
-                return $this->register($request, $provider);
+                return $passport->register($request, $provider);
             }
             if ($action === 'passport_service.login') {
-                if (!$request->isMethod('POST')) { throw new AccessDenied('invalid_request'); }
-                [$user, $session, $token] = $auth->login($provider, $request);
-                $this->recordLogin('success');
-                return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success', 'data' => [
-                    'token' => $token, 'user' => $this->userData($user),
-                    'xmpp' => ['ip' => parse_url((string) config('mdiag-dwt.base_url'), PHP_URL_HOST), 'domain' => parse_url((string) config('mdiag-dwt.base_url'), PHP_URL_HOST), 'port' => '5222'],
-                    'notification' => $user->notification_text,
-                ]]);
+                return $passport->login($provider,$request,$parsed,$auth,$protocol);
             }
             [$user, $session] = $auth->authenticate($provider, $request, $parsed);
-            if ($action === 'passport_service.logout') {
-                $session->delete();
-                return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success']);
-            }
-            if ($action === 'userinfo.get_base_info') {
-                return $protocol->reply($parsed, ['code' => 0, 'msg' => 'success', 'data' => $this->userData($user)]);
-            }
+            $accountResponse=$passport->account($action,$request,$user,$session,$parsed,$protocol);
+            if ($accountResponse!==null) { return $accountResponse; }
             $method = $parsed['method'];
             if ($method === 'getRegisteredProductsForPad') {
                 return $protocol->reply($parsed, ['code' => 0, 'message' => 'success', 'productDTOs' => $catalog->products($user)]);
@@ -85,10 +72,11 @@ final class GatewayController
                 return $protocol->reply($parsed, ['code' => 0, 'message' => 'success',
                     'isCDNWork' => '0', ($incr ? 'xdigPadSoftIncrList' : 'xdigPadSoftList') => $rows]);
             }
+            DebugTrace::write('unsupported_command', ['action'=>$action,'soap_method'=>$method,'url'=>DebugTrace::url($request->url())]);
             throw new AccessDenied('unsupported');
         } catch (AccessDenied $e) {
             if ($request->input('action') === 'passport_service.login') {
-                $this->recordLogin($e->reason);
+                app(PassportApi::class)->recordLogin($e->reason);
             }
             $response = $errors->respond($provider, $parsed, $e, $protocol);
             if (in_array(ltrim((string) $path, '/'), LocalCatalog::DOWNLOAD_PATHS, true)) {
@@ -100,7 +88,7 @@ final class GatewayController
         } catch (\Throwable $exception) {
             \DevWorkTech\MDiag\Services\Local\DebugTrace::write('handler_error', ['class'=>get_class($exception),'file'=>basename($exception->getFile()),'line'=>$exception->getLine()]);
             if ($request->input('action') === 'passport_service.login') {
-                $this->recordLogin('internal_error');
+                app(PassportApi::class)->recordLogin('internal_error');
             }
             // Не вызываем report(): глобальный трекер Laravel может отправить запрос наружу.
             // Не включаем текст SQL/пароль/токен в ответ планшету.
@@ -109,49 +97,4 @@ final class GatewayController
         }
     }
 
-    /** Только время и причина: без логина, пароля, SN, токена и внешних логгеров. */
-    private function recordLogin(string $result): void
-    {
-        if (!config('app.debug', false) && !(bool) config('mdiag-dwt.auth.diagnostic_log', false)) { return; }
-        $line = gmdate('c') . ' login ' . preg_replace('/[^a-z_]/', '', $result) . PHP_EOL;
-        // Ошибка записи диагностического файла не должна ломать вход.
-        @file_put_contents(storage_path('logs/mdiag-auth.log'), $line, FILE_APPEND | LOCK_EX);
-    }
-
-    private function userData(LocalUser $user): array
-    {
-        return ['id' => $user->id, 'user_id' => (string) $user->id, 'user_name' => $user->login,
-            'nick_name' => $user->login, 'type' => 2, 'valid' => true,
-            'expires_at' => $user->expires_at?->toIso8601String(),
-            'notification' => $user->notification_text];
-    }
-
-    /** Все bootstrap-адреса формируются от настроенного домена, без внешних origin. */
-    private function configuration(string $provider, ProfileRegistry $profiles): Response
-    {
-        if ($provider !== 'xdiag') { throw new AccessDenied('unsupported'); }
-        $paths = json_decode(file_get_contents(__DIR__ . '/../../../resources/xdiag-routes.json'), true, flags: JSON_THROW_ON_ERROR);
-        $urls = [];
-        foreach ($paths as $key => $path) {
-            $urls[] = ['key' => $key, 'value' => $profiles->localBase($provider) . '/' . ltrim($path, '/')];
-        }
-        return response()->json(['code' => 0, 'msg' => 'success', 'data' => ['urls' => $urls, 'version' => '22', 'area' => '1']]);
-    }
-
-    /** Саморегистрация не выдаёт доступ к сканерам или файлам до одобрения оператора. */
-    private function register(Request $request, string $provider): Response
-    {
-        if (!config('mdiag-dwt.auth.registration_enabled', false)) { throw new AccessDenied('registration_disabled'); }
-        $key = 'mdiag:register:' . hash('sha256', (string) $request->ip());
-        if (RateLimiter::tooManyAttempts($key, 5)) { throw new AccessDenied('rate_limited'); }
-        RateLimiter::hit($key, 3600);
-        $name = $request->input('login_key', $request->input('username'));
-        $password = $request->input('password');
-        if (!$request->isMethod('POST') || !is_string($name) || !preg_match('/^[A-Za-z0-9_.@-]{3,128}$/D', $name)
-            || !is_string($password) || strlen($password) < 8 || strlen($password) > 4096) { throw new AccessDenied('invalid_request'); }
-        if (LocalUser::where('provider', $provider)->where('login', $name)->exists()) { throw new AccessDenied('login_taken'); }
-        LocalUser::create(['provider' => $provider, 'login' => $name, 'password' => Hash::make($password), 'allowed_modules' => []]);
-        return response()->json(['code' => 0, 'msg' => 'Учётная запись создана. Ожидайте разрешения администратора.']);
-    }
 }
-

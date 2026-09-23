@@ -11,7 +11,8 @@ final class DebugTrace
         $dir = storage_path('logs');
         if (!is_dir($dir)) { @mkdir($dir, 0770, true); }
         $file = $dir . '/mdiag-debug-' . gmdate('Y-m-d') . '.log';
-        $line = json_encode(['time'=>gmdate('c'),'event'=>$event]+$context, JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
+        $requestId=app()->bound('request') ? request()->attributes->get('mdiag_request_id') : null;
+        $line = json_encode(['time'=>gmdate('c'),'event'=>$event]+$context+['id'=>$requestId], JSON_UNESCAPED_UNICODE|JSON_INVALID_UTF8_SUBSTITUTE);
         return @file_put_contents($file, $line . PHP_EOL, FILE_APPEND|LOCK_EX) !== false;
     }
 

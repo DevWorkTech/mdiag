@@ -7,20 +7,20 @@ SOAP-методы: getRegisteredProductsForPad; queryLatestDiagSofts и подд
 |---|---|---|
 | config.urls | `/?action=config_service.urls` | Локальный JSON |
 | user.get_base_info | `/?action=userinfo.get_base_info` | Локальный JSON |
-| user.get_base_info_car_logo | `/?action=userinfo.get_base_info_car_logo` | Не реализован |
-| user.set_base | `/?action=userinfo.set_base` | Не реализован |
-| user.set_area | `/?action=userinfo.set_area` | Не реализован |
+| user.get_base_info_car_logo | `/?action=userinfo.get_base_info_car_logo` | Локальный профиль |
+| user.set_base | `/?action=userinfo.set_base` | Локальный профиль/мастерская |
+| user.set_area | `/?action=userinfo.set_area` | Локальный профиль/мастерская |
 | user.unbind_tel | `/?action=userinfo.unbind_tel` | Не реализован |
 | user.unbind_email | `/?action=userinfo.unbind_email` | Не реализован |
 | user.get_contact | `/?action=userinfo.get_contact` | Не реализован |
-| user.set_ext | `/?action=userinfo.set_ext` | Не реализован |
+| user.set_ext | `/?action=userinfo.set_ext` | Локальный профиль/мастерская |
 | user.get_priconf | `/?action=userinfo.get_priconf` | Не реализован |
 | user.set_conf | `/?action=userinfo.set_conf` | Не реализован |
 | user.get_common | `/?action=userinfo.get_common` | Не реализован |
 | user.get_rand_hobby | `/?action=userinfo.get_rand_hobby` | Не реализован |
 | user.get_hobby | `/?action=userinfo.get_hobby` | Не реализован |
 | user.get_map_conf | `/?action=userinfo.get_map_conf` | Не реализован |
-| userinfo.set_password | `/?action= userinfo.set_password` | Не реализован |
+| userinfo.set_password | `/?action= userinfo.set_password` | pw/chpw, смена локального пароля с отзывом сессий |
 | verify.req_send_code | `/?action=verifycode.req_send_code` | Не реализован |
 | verify.request | `/?action=verifycode.request_send_code` | Не реализован |
 | verify.verify_code | `/?action=verifycode.verify` | Не реализован |

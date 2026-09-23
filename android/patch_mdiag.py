@@ -96,13 +96,22 @@ def patch_manifest(root: Path, new_package: str, label: str, cleartext: bool = F
                 element.set(android_attr("name"), new_package + name[len(original_package):])
 
     manifest.set("package", new_package)
+    # Видно в настройках Android, установлен ли новый транспорт, а не старый APK.
+    # Apktool берёт эти значения из apktool.yml, поэтому обновляем оба источника.
+    manifest.set(android_attr("versionName"), "7.00.014-mdiag2")
+    metadata = root / "apktool.yml"
+    if metadata.exists():
+        text = metadata.read_text()
+        text = re.sub(r'(?m)^(\s*versionName:).*$' , r'\1 7.00.014-mdiag2', text)
+        metadata.write_text(text)
     application = manifest.find("application")
 
     if application is None:
         raise RuntimeError("AndroidManifest.xml has no application element")
 
     application.set(android_attr("label"), label)
-    application.set(android_attr("usesCleartextTraffic"), str(cleartext).lower())
+    # Сохраняем исходное разрешение HTTP: проверки Интернета и сторонние
+    # страницы оригинала не должны ломаться из-за настройки нового домена.
     application.set(
         android_attr("networkSecurityConfig"),
         "@xml/mdiag_network_security_config",
@@ -182,10 +191,16 @@ def write_network_security(root: Path, lan_host: str, ca_file: Path | None = Non
         raw_dir.mkdir(parents=True, exist_ok=True)
         (raw_dir / "mdiag_local_ca.pem").write_bytes(checked)
         extra_anchor = '            <certificates src="@raw/mdiag_local_ca" />'
+    original = xml_dir / "network_security_config.xml"
+    base_cleartext = "true"
+    if original.exists():
+        base = ET.parse(original).getroot().find("base-config")
+        if base is not None:
+            base_cleartext = base.get("cleartextTrafficPermitted", "true")
     (xml_dir / "mdiag_network_security_config.xml").write_text(
         f"""<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="{base_cleartext}">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
@@ -293,7 +308,7 @@ def patch_text_files(
 
 
 def patch_apache_lan_tls(root: Path, lan_host: str) -> None:
-    """Точное место 7.00.014: Apache-клиент входа использует свой BKS, не WebView CA."""
+    """Дополнительный Apache-стек; основной вход выполняется через OkHttp."""
     def source(suffix: str) -> Path:
         matches = [d / suffix for d in root.glob('smali*') if (d / suffix).is_file()]
         if len(matches) != 1:
@@ -326,6 +341,60 @@ def patch_apache_lan_tls(root: Path, lan_host: str) -> None:
     print('Apache TLS: system trust and hostname verification for LAN; original external BKS retained')
 
 
+def patch_okhttp_transport(root: Path, new_base: str) -> None:
+    """Проверяем реальные сигнатуры версии 7.00.014, а не похожие имена классов."""
+    def source(suffix: str) -> Path:
+        files = [p / suffix for p in root.glob('smali*') if (p / suffix).is_file()]
+        if len(files) != 1:
+            raise RuntimeError('Expected one transport class: ' + suffix)
+        return files[0]
+
+    checks = {
+        'j/x$b.smali': ['a(Ljavax/net/ssl/SSLSocketFactory;Ljavax/net/ssl/X509TrustManager;)',
+                        '<init>(Lj/x;)V', 'a(Lj/g;)', '.field public final e:Ljava/util/List;'],
+        'j/a0.smali': ['g()Lj/t;', 'f()Lj/a0$a;', 'a(Ljava/lang/String;)Ljava/lang/String;'],
+        'j/a0$a.smali': ['b(Ljava/lang/String;)Lj/a0$a;', 'a(Ljava/lang/String;)Lj/a0$a;',
+                         'b(Ljava/lang/String;Ljava/lang/String;)Lj/a0$a;'],
+        'j/z.smali': ['static a(Lj/x;Lj/a0;Z)Lj/z;'],
+        'j/u$a.smali': ['request()Lj/a0;', 'a(Lj/a0;)Lj/c0;'],
+        'j/c0.smali': ['c()I', 'a(Ljava/lang/String;)Ljava/lang/String;'],
+        'j/g.smali': ['.field public static final c:Lj/g;'],
+        'okhttp3/internal/tls/OkHostnameVerifier.smali': ['.field public static final a:'],
+    }
+    for path, signatures in checks.items():
+        text = source(path).read_text()
+        for signature in signatures:
+            if signature not in text:
+                raise RuntimeError('Unsupported OkHttp ABI: '+path+' '+signature)
+    client = source('j/x.smali')
+    text = client.read_text()
+    pattern = r'(?ms)^\.method public a\(Lj/a0;\)Lj/e;.*?^\.end method'
+    replacement = '''.method public a(Lj/a0;)Lj/e;
+    .locals 1
+    invoke-static {p0, p1}, Ltech/devwork/mdiag/NetworkBridge;->newCall(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+    move-result-object v0
+    check-cast v0, Lj/e;
+    return-object v0
+.end method'''
+    text, count = re.subn(pattern, lambda _: replacement, text)
+    if count != 1:
+        raise RuntimeError('Unrecognized OkHttp newCall')
+    client.write_text(text)
+    login = source('com/xdiagpro/xdiasft/module/b1/a/a.smali')
+    text = login.read_text()
+    # Здесь p1 — Context, p2 — TelephonyManager. Возвращаем совместимый DeviceId
+    # даже когда READ_PHONE_STATE/IMEI недоступен. Сетевую проверку не меняем.
+    old = 'invoke-virtual {p2}, Landroid/telephony/TelephonyManager;->getDeviceId()Ljava/lang/String;'
+    if text.count(old) != 1:
+        raise RuntimeError('Unrecognized login device ID call')
+    login.write_text(text.replace(old,
+        'invoke-static {p2, p1}, Ltech/devwork/mdiag/NetworkBridge;->deviceId(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;'))
+    helper = source('tech/devwork/mdiag/NetworkBridge.smali')
+    for part in helper.parent.glob('NetworkBridge*.smali'):
+        part.write_text(part.read_text().replace('__MDIAG_BASE__', new_base.rstrip('/')))
+    print('OkHttp newCall: runtime URL routing, per-local-client system TLS, safe DeviceId, correlated trace')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--decoded", required=True, type=Path)
@@ -355,6 +424,7 @@ def main() -> int:
     )
     write_network_security(root, lan_host, args.ca_cert, urlparse(args.new_base).scheme == "http")
     patch_apache_lan_tls(root, lan_host)
+    patch_okhttp_transport(root, args.new_base)
 
     endpoints, package_strings = patch_text_files(
         root,
@@ -376,6 +446,8 @@ def main() -> int:
                 web_prefix = ""
                 if parsed.hostname and (parsed.hostname == "xdiagpro.com" or parsed.hostname.endswith(".xdiagpro.com")):
                     web_prefix = "/" + (parsed.hostname.removesuffix(".xdiagpro.com") if parsed.hostname != "xdiagpro.com" else "portal")
+                if parsed.hostname == lan_host:
+                    continue
                 item["value"] = args.new_base.rstrip("/") + web_prefix + (parsed.path or "/") + (
                     "?" + parsed.query if parsed.query else "")
         bootstrap.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")

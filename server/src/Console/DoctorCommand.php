@@ -16,6 +16,19 @@ final class DoctorCommand extends Command
         $this->line('Домен модуля: '.$domain);
         $this->line('Проверка с планшета: '.rtrim($base,'/').'/xdiag/health');
         $this->line('APP_DEBUG: '.(config('app.debug')?'true':'false'));
+        $this->line('Ревизия протокола: transport2 / APK 7.00.014-mdiag2');
+        try {
+            $users=\DevWorkTech\MDiag\Models\LocalUser::where('provider','xdiag')->where('active',true)->count();
+            $this->line('Активных локальных пользователей XDiag: '.$users);
+            if ($users===0) { $this->warn('Создайте пользователя через mdiag:user: учётная запись поставщика не является локальной.'); }
+            if (!\Illuminate\Support\Facades\Schema::hasColumn('mdiag_users','profile_data')) {
+                $this->error('Не применена миграция профиля: выполните php artisan migrate.');
+                return self::FAILURE;
+            }
+        } catch (\Throwable $e) {
+            $this->error('База модуля недоступна: '.get_class($e));
+            return self::FAILURE;
+        }
         $routes=[];
         foreach (Route::getRoutes() as $route) {
             if (str_starts_with((string)$route->getName(), (string)config('mdiag-dwt.http.route_name_prefix','mdiag-dwt.'))) {

@@ -12,6 +12,6 @@ final class LocalUser extends Model
     protected $hidden = ['password'];
     protected $casts = [
         'active' => 'boolean', 'downloads_allowed' => 'boolean',
-        'expires_at' => 'immutable_datetime', 'allowed_modules' => 'array',
+        'expires_at' => 'immutable_datetime', 'allowed_modules' => 'array', 'profile_data' => 'array',
     ];
 }

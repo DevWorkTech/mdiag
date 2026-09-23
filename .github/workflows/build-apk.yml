@@ -29,6 +29,7 @@ on:
     branches:
       - main
       - codex/mdiag-dwt-v1
+      - codex/transport-rework
     paths:
       - android/**
       - server/**
@@ -81,6 +82,9 @@ jobs:
           keytool -genkeypair -noprompt -storetype JKS -keystore tls-test/server.jks -storepass local-test -keypass local-test -alias server -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=intentionally-wrong.invalid'
           timeout 30 java -cp 'tls-test/classes:tls-test/lib/*' tech.devwork.mdiag.LanTlsTest tls-test/server.jks
 
+      - name: Test actual login transport contract
+        run: bash android/tests/test_network_bridge.sh
+
       - name: Install Android build tools
         run: |
           ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
@@ -130,7 +134,7 @@ jobs:
       - name: Compile LAN TLS adapter
         run: |
           mkdir -p tls-classes tls-dex tls-apk
-          javac --release 8 -d tls-classes android/LanTls.java
+          javac --release 8 -d tls-classes android/LanTls.java android/NetworkBridge.java
           jar cf tls-helper.jar -C tls-classes .
           "$ANDROID_HOME/build-tools/35.0.0/d8" --min-api 19 --output tls-dex tls-helper.jar
           cp tls-dex/classes.dex tls-apk/classes.dex
@@ -160,7 +164,9 @@ jobs:
             --label 'mX-DIAG' "${ca_args[@]}"
 
       - name: Audit patched network code
-        run: python3 android/audit_network.py decoded --output network-after.json
+        run: |
+          python3 android/audit_network.py decoded --output network-after.json
+          python3 android/verify_network_checks.py network-before.json network-after.json "$LAN_SCHEME://$LAN_HOST/$PROFILE"
 
       - name: Build unsigned APK
         run: java -jar apktool.jar b decoded --output build-unsigned.apk
