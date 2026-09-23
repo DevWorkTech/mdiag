@@ -87,7 +87,8 @@ final class PassportApi
             'signature'=>'','qq'=>'','weixin'=>'','sex'=>0,'is_bind_email'=>0,'is_bind_mobile'=>0], $profile, [
             'id'=>$user->id,'user_id'=>(string)$user->id,'user_name'=>$user->login,
             'nick_name'=>$profile['nick_name'] ?? $user->login,'type'=>2,'valid'=>true,
-            'endTime'=>$user->expires_at?->getTimestamp() ?? 0,
+            // Tools.a(long, format) передаёт endTime в java.util.Date: миллисекунды.
+            'endTime'=>($user->expires_at?->getTimestamp() ?? 0) * 1000,
             'expires_at'=>$user->expires_at?->toIso8601String(),'notification'=>$user->notification_text]);
     }
 

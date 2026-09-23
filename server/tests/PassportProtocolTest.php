@@ -38,7 +38,7 @@ final class PassportProtocolTest extends TestCase
     {
         $password='local+ пароль & 123';
         $user=LocalUser::create(['provider'=>'xdiag','login'=>'workshop','password'=>Hash::make($password),
-            'active'=>true,'downloads_allowed'=>true]);
+            'active'=>true,'downloads_allowed'=>true,'expires_at'=>now()->addDay()]);
         ScannerAccessRule::create(['provider'=>'xdiag','serial'=>'968590000001','user_id'=>$user->id,'downloads_allowed'=>true]);
         $requestId=str_repeat('c',32);
         $login=$this->withHeader('X-MDiag-Request-Id',$requestId)->post($this->url('?action=passport_service.login'),[
@@ -47,7 +47,8 @@ final class PassportProtocolTest extends TestCase
             'manuf'=>'test','model'=>'tablet','board'=>'test','device'=>'test','product'=>'test','sdk'=>'35']);
         $login->assertOk()->assertHeader('X-MDiag-Request-Id',$requestId)->assertJsonPath('code',0)
             ->assertJsonPath('data.user.user_id',(string)$user->id)->assertJsonPath('data.user.valid',true)
-            ->assertJsonPath('data.xmpp.domain','diag.devwork.tech');
+            ->assertJsonPath('data.xmpp.domain','diag.devwork.tech')
+            ->assertJsonPath('data.user.endTime',$user->expires_at->getTimestamp()*1000);
         $token=$login->json('data.token');$this->assertSame(64,strlen($token));
         $this->post($this->signed('userinfo.get_base_info_car_logo',['lan'=>'ru'],$user,$token),['lan'=>'ru'])
             ->assertOk()->assertJsonPath('code',0)->assertJsonPath('data.user_name','workshop');

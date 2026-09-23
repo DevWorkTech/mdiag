@@ -65,6 +65,7 @@ public final class NetworkBridge {
                 b.getClass().getMethod("a", String.class).invoke(b, "Host");
                 String id = UUID.randomUUID().toString().replace("-", "");
                 b.getClass().getMethod("b", String.class, String.class).invoke(b, "X-MDiag-Request-Id", id);
+                b.getClass().getMethod("b", String.class, String.class).invoke(b, "X-MDiag-Client", "7.00.014-mdiag2");
                 request = b.getClass().getMethod("a").invoke(b);
                 client = localClient(client);
                 trace("request id="+id+" host="+new URI(target).getHost()+" path="+safePath(target));

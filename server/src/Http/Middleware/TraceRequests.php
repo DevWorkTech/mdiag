@@ -22,6 +22,7 @@ final class TraceRequests
             'url'=>DebugTrace::url($request->url()),'action'=>$action,
             'bytes'=>strlen($request->getContent()),
             'content_type'=>$request->getContentTypeFormat(),
+            'client'=>$request->header('X-MDiag-Client')==='7.00.014-mdiag2' ? '7.00.014-mdiag2' : 'unknown',
             // Только имена полей, без логина, пароля, SN, token и заголовков.
             'fields'=>array_values(array_filter(array_keys($request->all()),
                 static fn ($key)=>is_string($key) && preg_match('/^[a-zA-Z0-9_]{1,64}$/D',$key)))]);
