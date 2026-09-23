@@ -43,6 +43,8 @@ return [
     'connect_timeout' => 15,
     'request_timeout' => 120,
     'verify_tls' => false,
+    // Срок кеша официальной сессии, секунды. Cache::clear/optimize:clear удаляет её.
+    'official_session_ttl' => 7200,
     'auth' => [
         // На время диагностики входа: отдельный локальный файл logs/mdiag-auth.log.
         // Сохраняет только время и причину, не использует глобальные log handlers.

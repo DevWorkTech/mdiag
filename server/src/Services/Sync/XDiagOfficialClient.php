@@ -8,6 +8,7 @@ use GuzzleHttp\Cookie\CookieJar;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use SoapClient;
 use SoapHeader;
@@ -78,6 +79,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
     private array $serviceUrls = [];
     private CookieJar $cookies;
     private ?string $token = null;
+    private ?int $sessionExpiresAt = null;
     private ?string $userId = null;
     private ?string $accountType = null;
 
@@ -278,7 +280,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
                 $this->assertDownloadedFile($destination, $package);
                 return;
             } catch (Throwable $exception) {
-                DebugTrace::write('soap_error', ['method'=>$method,'class'=>get_class($exception)]);
+                DebugTrace::write('download_error', ['class'=>get_class($exception)]);
                 $last = $exception;
             }
         }
@@ -303,8 +305,65 @@ final class XDiagOfficialClient implements ProviderSyncClient
         $this->requiredCredential('password');
     }
 
-    /** Отправляет form-login с набором Android Build.*, используемым APK. */
+    /** Повторные CLI-команды используют ту же сессию и CookieJar без нового login. */
+    public function ensureSession(callable $report): void
+    {
+        $this->boot();
+        $this->authenticate($report);
+    }
+
     private function authenticate(callable $report): void
+    {
+        $store=new OfficialSessionStore();
+        $login=$this->requiredCredential('username');
+        $password=$this->requiredCredential('password');
+        // Lock предотвращает одновременный повторный вход нескольких CLI-процессов.
+        Cache::lock($store->key($login).':lock', max(60, (int)$this->config->get('mdiag-dwt.request_timeout',120)*3))->block(15,function () use ($store,$login,$password,$report): void {
+            $saved=$store->read($login,$password);
+            $this->soapClients=[];
+            if ($saved !== null) {
+                $state=$saved['state'];
+                $this->token=(string)$state['token'];
+                $this->userId=(string)$state['userId'];
+                $this->accountType=$state['accountType']??null;
+                $this->loginResponse=(array)($state['loginResponse']??[]);
+                $this->cookies=new CookieJar(false,(array)($state['cookies']??[]));
+                $this->sessionExpiresAt=(int)$saved['expires_at'];
+                $report('  Сессия XDiag восстановлена из кеша; повторный login не выполнялся.');
+                return;
+            }
+            $this->token=$this->userId=$this->accountType=null;
+            $this->loginResponse=[];
+            $this->cookies=new CookieJar();
+            $this->sessionExpiresAt=null;
+            $this->authenticateFresh($report);
+            $this->sessionExpiresAt=time()+max(60,(int)$this->config->get('mdiag-dwt.official_session_ttl',7200));
+            $store->write($login,$password,$this->sessionState(),$this->sessionExpiresAt);
+            $report('  Сессия XDiag и cookies сохранены в зашифрованном кеше.');
+        });
+    }
+
+    private function sessionState(): array
+    {
+        return ['token'=>$this->token,'userId'=>$this->userId,'accountType'=>$this->accountType,
+            'loginResponse'=>$this->loginResponse,'cookies'=>$this->cookies->toArray()];
+    }
+
+    /** Очистка не вызывает новый вход и не затрагивает локальных пользователей. */
+    public function logout(): void
+    {
+        if (!app()->runningInConsole()) { throw new RuntimeException('Выход клиента синхронизации разрешён только через консоль.'); }
+        $store=new OfficialSessionStore();
+        $login=$this->requiredCredential('username');
+        Cache::lock($store->key($login).':lock',60)->block(15,fn ()=>$store->forget($login));
+        $this->token=$this->userId=$this->accountType=null;
+        $this->sessionExpiresAt=null;
+        $this->loginResponse=$this->soapClients=$this->serviceUrls=[];
+        $this->cookies=new CookieJar();
+    }
+
+    /** Отправляет form-login с набором Android Build.*, используемым APK. */
+    private function authenticateFresh(callable $report): void
     {
         try {
             $this->authenticatePassport();
@@ -361,6 +420,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
         if (!$response->successful()) {
             throw new RuntimeException("Ошибка официальной авторизации HTTP {$response->status()}.");
         }
+        $this->cookies->extractCookies(new \GuzzleHttp\Psr7\Request('POST',self::PRIMARY_ORIGIN.self::LOGIN_PATH),$response->toPsrResponse());
         $json = $response->json();
         if (!is_array($json)) {
             throw new RuntimeException('Официальный login вернул не JSON.');
@@ -447,6 +507,7 @@ final class XDiagOfficialClient implements ProviderSyncClient
             $safeCode = $code !== null && preg_match('/^-?[0-9]{1,10}$/D', $code) === 1 ? $code : 'не указан';
             throw new RuntimeException("Нет подтверждённой deviceUser-сессии; code={$safeCode}.");
         }
+        $this->cookies->extractCookies(new \GuzzleHttp\Psr7\Request('POST',$url),$response->toPsrResponse());
         $this->token = $token;
         $this->userId = $userId;
         $this->accountType = null;
@@ -741,10 +802,9 @@ final class XDiagOfficialClient implements ProviderSyncClient
             'stream_context' => $context,
             'trace' => true,
         ]);
-        foreach ($this->cookies->toArray() as $cookie) {
-            if (isset($cookie['Name'], $cookie['Value'])) {
-                $client->__setCookie((string) $cookie['Name'], (string) $cookie['Value']);
-            }
+        $cookieHeader=$this->cookies->withCookieHeader(new \GuzzleHttp\Psr7\Request('POST',$endpoint))->getHeaderLine('Cookie');
+        foreach (explode('; ', $cookieHeader) as $pair) {
+            if (str_contains($pair,'=')) { [$name,$value]=explode('=',$pair,2); $client->__setCookie($name,$value); }
         }
 
         return $this->soapClients[$endpoint] = $client;

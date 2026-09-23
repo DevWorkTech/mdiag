@@ -38,6 +38,7 @@ final class MDiagServiceProvider extends ServiceProvider
                 ScannerAccessCommand::class,
                 ScannerListCommand::class,
                 SyncPackagesCommand::class,
+                \DevWorkTech\MDiag\Console\OfficialLogoutCommand::class,
                 \DevWorkTech\MDiag\Console\DoctorCommand::class,
             ]);
         }
