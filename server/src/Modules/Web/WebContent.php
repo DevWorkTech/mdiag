@@ -31,7 +31,7 @@ final class WebContent
                 $manifest=json_decode(file_get_contents($file),true,512,JSON_THROW_ON_ERROR);
                 $sourcePath='/'.preg_replace('~^[^/]+/?~','',$path);
                 $query=request()->getQueryString();
-                $key=$sourcePath.($query ? '?'.$query : '');
+                $key=WebMirror::key('https://repairdata.xdiagpro.com'.$sourcePath.($query ? '?'.$query : ''));
                 $entry=$manifest['files'][$key] ?? null;
                 if (!$entry || !preg_match('/^[a-f0-9]{64}$/D',$entry['file'] ?? '') || !is_file($dir.'/'.$entry['file'])) {
                     return response()->json(['code'=>900008,'msg'=>'Ресурс не сохранён локально или требует отдельного API-адаптера.'],404);
@@ -57,16 +57,26 @@ final class WebContent
             if (in_array($module->key(),['customers','workshop'],true) || $sources===[]) {
                 $report($module->key().': заготовка; заполните адаптер/источники в src/Modules/Web.'); continue;
             }
+            $client=null;
+            if (!$listOnly && $module->key()==='repairdata') {
+                if ((string)config('mdiag-dwt.profiles.xdiag.sync.username','') !== '') {
+                    $client=app(\DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::class);
+                    $client->ensureSession($report);
+                    if (config('mdiag-dwt.web_content.modules.repairdata.sources')===null) { $sources=$client->repairDataSources($sources,$report); }
+                } else { $report('  repairdata: официальный логин не настроен; запрос без сессии.'); }
+            }
             foreach ($sources as $url) {
                 $p=is_string($url)?parse_url($url):false;
                 if (!$p || !in_array($p['scheme']??'', ['https','http'],true)
-                    || !in_array(strtolower($p['host']??''),['xdiagpro.com','www.xdiagpro.com','repairdata.xdiagpro.com'],true)
+                    || !in_array(strtolower($p['host']??''),['xdiagpro.com','www.xdiagpro.com','repairdata.xdiagpro.com','services.x-diag.info'],true)
                     || isset($p['user']) || isset($p['pass'])) { throw new RuntimeException('Недопустимый источник web-контента.'); }
                 $report($module->key().': '.DebugTrace::url($url));
             }
             if (!$listOnly) {
-                (new WebMirror())->sync($sources,$this->root().'/'.$module->key(),
-                    '/xdiag/'.explode('/',$this->settings($module,'paths')[0])[0],$report);
+                try {
+                    (new WebMirror())->sync($sources,$this->root().'/'.$module->key(),
+                        '/xdiag/'.explode('/',$this->settings($module,'paths')[0])[0],$report,$client ? [$client,'webRequest'] : null);
+                } finally { $client?->saveSessionChanges(); }
             }
         }
     }

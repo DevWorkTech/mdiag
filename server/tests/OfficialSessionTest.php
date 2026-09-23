@@ -59,4 +59,35 @@ final class OfficialSessionTest extends TestCase
         $this->assertNull($store->read('owner','secret-password'));
         Http::assertSentCount(1);
     }
+    public function test_web_sync_reuses_cookie_jar_and_bootstrap_without_new_login(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(function ($request) {
+            if (str_contains($request->url(),'action=passport_service.login')) {
+                return Http::response(['code'=>0,'data'=>['token'=>'private-token','user'=>['user_id'=>'42']]],200,
+                    ['Set-Cookie'=>'session_cookie=private-cookie; Path=/; Secure; HttpOnly']);
+            }
+            if (str_contains($request->url(),'action=config_service.urls')) {
+                return Http::response(['data'=>['urls'=>[['key'=>'diagnosisAndRepair','value'=>'https://services.x-diag.info/repairdata/newmain/?source=app']]]],200);
+            }
+            if (str_starts_with($request->url(),'https://services.x-diag.info/repairdata/newmain/')) {
+                return Http::response('<html><body>Authenticated repair page</body></html>',200,
+                    ['Content-Type'=>'text/html','Set-Cookie'=>'web_session=web-cookie; Path=/repairdata; Secure']);
+            }
+            throw new \RuntimeException('Unexpected HTTP target');
+        });
+        $web=app(\DevWorkTech\MDiag\Modules\Web\WebContent::class);
+        $web->sync(['repairdata'],false,static function ($m) {});
+        $this->assertSame(200,$web->response('repairdata/newmain/','GET')->getStatusCode());
+        Http::assertSentCount(3);
+        $saved=(new OfficialSessionStore())->read('owner','secret-password');
+        $cookies=array_column($saved['state']['cookies'],'Value','Name');
+        $this->assertSame('private-cookie',$cookies['session_cookie']);
+        $this->assertSame('web-cookie',$cookies['web_session']);
+        $web->sync(['repairdata'],false,static function ($m) {});
+        Http::assertSentCount(5);
+        $this->assertSame(1, count(Http::recorded(fn ($r)=>str_contains($r->url(),'action=passport_service.login'))));
+        $this->assertSame('/newmain/?source=app',\DevWorkTech\MDiag\Modules\Web\WebMirror::key('https://services.x-diag.info/repairdata/newmain/?token=secret&cc=42&source=app&sign=signature'));
+    }
+
 }

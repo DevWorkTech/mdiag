@@ -43,6 +43,15 @@ public final class LanTlsTest {
                 } catch (javax.net.ssl.SSLException expected) { rejected = true; }
                 if (!rejected) { throw new AssertionError("Non-LAN certificate was not checked"); }
             }
+            HttpClientBuilder strictBuilder = HttpClientBuilder.create();
+            LanTls.configureTrusted(strictBuilder, SSLContext.getDefault());
+            try (CloseableHttpClient strict = strictBuilder.build()) {
+                try (org.apache.http.client.methods.CloseableHttpResponse ignored = strict.execute(new HttpGet("https://localhost:" + server.getAddress().getPort() + "/"))) {
+                    throw new AssertionError("Production TLS accepted untrusted LAN certificate");
+                } catch (javax.net.ssl.SSLException expected) {
+                    System.out.println("PASS: production LAN TLS rejects untrusted certificate");
+                }
+            }
             System.out.println("PASS: LAN self-signed TLS; non-LAN certificate rejected; exact hostname scope");
         } finally { server.stop(0); }
     }

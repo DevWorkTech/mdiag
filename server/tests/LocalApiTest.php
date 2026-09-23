@@ -124,6 +124,10 @@ final class LocalApiTest extends TestCase
         Http::swap(new \Illuminate\Http\Client\Factory());
         Http::preventStrayRequests();
         Http::fake(['*'=>Http::response(['code'=>0,'data'=>['token'=>'primary-token','user'=>['user_id'=>'321']]],200)]);
+        // Без logout используется только что сохранённая deviceUser-сессия.
+        (new \ReflectionMethod($client,'authenticate'))->invoke($client,static function ($message) {});
+        Http::assertNothingSent();
+        $client->logout();
         $client=$this->app->make(\DevWorkTech\MDiag\Services\Sync\XDiagOfficialClient::class);
         (new \ReflectionMethod($client,'authenticate'))->invoke($client,static function ($message) {});
         Http::assertSentCount(1);

@@ -315,7 +315,7 @@ def patch_apache_lan_tls(root: Path, lan_host: str) -> None:
     if text.count(instruction) != 1:
         raise RuntimeError('Unrecognized AsyncHttpClient TLS initialization')
     hook = ('    invoke-static {v0, v1}, Ltech/devwork/mdiag/LanTls;'
-            '->configure(Ljava/lang/Object;Ljavax/net/ssl/SSLContext;)V\n\n')
+            '->configureTrusted(Ljava/lang/Object;Ljavax/net/ssl/SSLContext;)V\n\n')
     client.write_text(text.replace(instruction, hook + instruction))
     helper = source('tech/devwork/mdiag/LanTls.smali')
     contents = helper.read_text()
@@ -323,7 +323,7 @@ def patch_apache_lan_tls(root: Path, lan_host: str) -> None:
         raise RuntimeError('LAN TLS helper host placeholder missing')
     for part in helper.parent.glob('LanTls*.smali'):
         part.write_text(part.read_text().replace('__MDIAG_LAN_HOST__', lan_host))
-    print('Apache TLS: local-host-only certificate exception installed; original external BKS retained')
+    print('Apache TLS: system trust and hostname verification for LAN; original external BKS retained')
 
 
 def main() -> int:

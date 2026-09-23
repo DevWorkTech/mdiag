@@ -15,6 +15,8 @@ use RuntimeException;
 final class WebMirror
 {
     private string $host;
+    /** Необязательный транспорт с CookieJar официального CLI-клиента. */
+    private $requester = null;
     private string $prefix;
     private array $queue = [];
     private array $queued = [];
@@ -38,7 +40,13 @@ final class WebMirror
     public static function key(string $url): string
     {
         $u = new Uri($url);
-        return ($u->getPath() ?: '/').($u->getQuery() !== '' ? '?'.$u->getQuery() : '');
+        $path=$u->getPath() ?: '/';
+        if ($u->getHost()==='services.x-diag.info' && str_starts_with($path,'/repairdata/')) { $path=substr($path,strlen('/repairdata')); }
+        parse_str($u->getQuery(),$query);
+        // Служебные данные не попадают в manifest и локальные href.
+        foreach (['token','sign','cc','user_id'] as $field) { unset($query[$field]); }
+        ksort($query);
+        return $path.($query!==[] ? '?'.http_build_query($query,'','&',PHP_QUERY_RFC3986) : '');
     }
 
     private function local(string $url): string { return $this->prefix.self::key($url); }
@@ -61,7 +69,7 @@ final class WebMirror
             if (isset($seen[$url])) { throw new RuntimeException('Web: цикл перенаправлений.'); }
             $seen[$url] = true;
             DebugTrace::write('content_outgoing', ['url'=>DebugTrace::url($url)]);
-            $r = Http::connectTimeout(10)->timeout(40)->withOptions(['allow_redirects'=>false,'stream'=>true,'verify'=>(bool)config('mdiag-dwt.verify_tls',false)])->get($url);
+            $r = $this->requester ? ($this->requester)($url) : Http::connectTimeout(10)->timeout(40)->withOptions(['allow_redirects'=>false,'stream'=>true,'verify'=>(bool)config('mdiag-dwt.verify_tls',false)])->get($url);
             $stream = $r->toPsrResponse()->getBody();
             if (in_array($r->status(), [301,302,303,307,308], true)) {
                 $stream->close();
@@ -137,12 +145,13 @@ final class WebMirror
     }
 
     /** Публикуем manifest атомарно только после всех загрузок. Ошибка оставляет предыдущий снимок рабочим. */
-    public function sync(array $sources, string $directory, string $prefix, callable $report): void
+    public function sync(array $sources, string $directory, string $prefix, callable $report, ?callable $requester=null): void
     {
         $this->prefix = $prefix;
+        $this->requester = $requester;
         $this->queue = $this->queued = [];
         $this->host = strtolower((string)parse_url($sources[0], PHP_URL_HOST));
-        if (!in_array($this->host,['xdiagpro.com','www.xdiagpro.com','repairdata.xdiagpro.com'],true)) { throw new RuntimeException('Недопустимый источник web-контента.'); }
+        if (!in_array($this->host,['xdiagpro.com','www.xdiagpro.com','repairdata.xdiagpro.com','services.x-diag.info'],true)) { throw new RuntimeException('Недопустимый источник web-контента.'); }
         foreach ($sources as $url) { $this->enqueue($url,0); }
         if (!is_dir($directory) && !mkdir($directory,0770,true) && !is_dir($directory)) { throw new RuntimeException('Не удалось создать каталог web.'); }
         $manifest = ['files'=>[], 'created_at'=>gmdate('c')]; $total = 0;
@@ -159,7 +168,7 @@ final class WebMirror
             $manifest['files'][self::key($original)] = $entry;
             $manifest['files'][self::key($url)] = $entry;
             // Приложение открывает стартовую страницу как с source=app, так и без параметра.
-            if (in_array($original,$sources,true)) { $manifest['files'][(new Uri($original))->getPath() ?: '/'] = $entry; }
+            if (in_array($original,$sources,true)) { $manifest['files'][self::key((string)(new Uri($original))->withQuery(''))] = $entry; }
         }
         $json = json_encode($manifest,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
         $version = hash('sha256',$json);

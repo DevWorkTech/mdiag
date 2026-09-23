@@ -349,6 +349,57 @@ final class XDiagOfficialClient implements ProviderSyncClient
             'loginResponse'=>$this->loginResponse,'cookies'=>$this->cookies->toArray()];
     }
 
+    /** Bootstrap может переопределить web-адрес, как таблицу diagnosisAndRepair в APK. */
+    public function repairDataSources(array $fallback, callable $report): array
+    {
+        $r=$this->pending()->get(self::PRIMARY_ORIGIN.'/', ['action'=>'config_service.urls','app_id'=>self::APP_ID,'ver'=>self::PROTOCOL_VERSION]);
+        foreach ((array)$r->json('data.urls',[]) as $index=>$row) {
+            $key=is_array($row)?($row['key']??null):$index;
+            $url=is_array($row)?($row['value']??null):$row;
+            if ($key==='diagnosisAndRepair' && is_string($url)) {
+                $this->checkWebUrl($url);
+                $report('  repairdata: адрес получен из config_service.urls.');
+                return [$url];
+            }
+        }
+        $report('  repairdata: ключ diagnosisAndRepair отсутствует; использую адрес APK/конфига.');
+        return $fallback;
+    }
+
+    private function checkWebUrl(string $url): void
+    {
+        $p=parse_url($url);
+        if (!$p || !in_array($p['scheme']??'', ['http','https'],true)
+            || !in_array(strtolower($p['host']??''),['services.x-diag.info','repairdata.xdiagpro.com','xdiagpro.com','www.xdiagpro.com'],true)
+            || isset($p['user']) || isset($p['pass']) || !in_array($p['port']??null,[null,80,443],true)) {
+            throw new RuntimeException('Web: неподтверждённый адрес; сессия не передана.');
+        }
+    }
+
+    /** CookieJar соблюдает Domain/Path/Secure. Не копируем token между доменами вручную. */
+    public function webRequest(string $url): \Illuminate\Http\Client\Response
+    {
+        if (!app()->runningInConsole() || $this->token===null) { throw new RuntimeException('Требуется CLI-сессия XDiag.'); }
+        $this->checkWebUrl($url);
+        $r=$this->pending()->withOptions(['stream'=>true])->get($url);
+        $this->cookies->extractCookies(new \GuzzleHttp\Psr7\Request('GET',$url),$r->toPsrResponse());
+        return $r;
+    }
+
+    /** Обновляет cookies, не возрождая сессию после logout/cache:clear другого процесса. */
+    public function saveSessionChanges(): void
+    {
+        $store=new OfficialSessionStore();
+        $login=$this->requiredCredential('username');
+        $password=$this->requiredCredential('password');
+        Cache::lock($store->key($login).':lock',60)->block(15,function () use ($store,$login,$password): void {
+            $saved=$store->read($login,$password);
+            if ($saved !== null && hash_equals((string)$saved['state']['token'],(string)$this->token)) {
+                $store->write($login,$password,$this->sessionState(),(int)$saved['expires_at']);
+            }
+        });
+    }
+
     /** Очистка не вызывает новый вход и не затрагивает локальных пользователей. */
     public function logout(): void
     {

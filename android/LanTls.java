@@ -20,7 +20,13 @@ public final class LanTls {
         return host != null && LAN_HOST.equalsIgnoreCase(host);
     }
 
-    public static void configure(Object builder, SSLContext original) {
+    /** Совместимость с прежним диагностическим тестом для самоподписанного LAN. */
+    public static void configure(Object builder, SSLContext original) { configureMode(builder,original,true); }
+
+    /** Рабочая сборка .ru: системное доверие Android и проверка hostname для Let's Encrypt. */
+    public static void configureTrusted(Object builder, SSLContext original) { configureMode(builder,original,false); }
+
+    private static void configureMode(Object builder, SSLContext original, boolean insecure) {
         try {
             final ClassLoader loader = builder.getClass().getClassLoader();
             final Class<?> factoryClass = Class.forName("org.apache.http.conn.ssl.SSLConnectionSocketFactory", true, loader);
@@ -44,7 +50,9 @@ public final class LanTls {
                     return null;
                 }
             });
-            final Object local = factoryClass.getConstructor(SSLContext.class, verifierClass).newInstance(localContext, verifier);
+            final Object local = insecure
+                ? factoryClass.getConstructor(SSLContext.class, verifierClass).newInstance(localContext, verifier)
+                : factoryClass.getConstructor(SSLContext.class).newInstance(SSLContext.getDefault());
             Object selector = Proxy.newProxyInstance(loader, new Class<?>[]{layeredClass}, new InvocationHandler() {
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     if (method.getDeclaringClass() == Object.class) { return objectMethod(proxy, method, args); }
@@ -64,7 +72,7 @@ public final class LanTls {
                 }
             });
             builder.getClass().getMethod("setSSLSocketFactory", layeredClass).invoke(builder, selector);
-            System.err.println("MDiagTLS: Apache LAN adapter installed for " + LAN_HOST);
+            System.err.println("MDiagTLS: Apache LAN adapter installed (insecure=" + insecure + ") for " + LAN_HOST);
         } catch (ReflectiveOperationException | java.security.GeneralSecurityException e) {
             // Не продолжаем с незаметно неработающей TLS-настройкой.
             throw new IllegalStateException("MDiagTLS: incompatible Apache client", e);
