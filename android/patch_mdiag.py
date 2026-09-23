@@ -29,8 +29,8 @@ COMPONENT_TAGS = {
     "instrumentation",
 }
 
-# Старые IP используются APK только в штатных download-маршрутах. Ограничение
-# по пути не позволяет случайно перенаправить в Laravel адреса производителей.
+# Подтверждённые пути запросов на числовые серверы. Голый SOAP namespace
+# https://79.174.70.97 не является HTTP endpoint и должен остаться неизменным.
 LEGACY_DOWNLOAD_PATHS = (
     "/mobile/softCenter/adaspointdown.php",
     "/mobile/softCenter/diagpointdown.php",
@@ -38,6 +38,9 @@ LEGACY_DOWNLOAD_PATHS = (
     "/mobile/softCenter/downloadDiagSoftWs.action",
     "/opendiag/downloadDiagSoftForDiag.php",
     "/diag/dlDiagSoftPack.php",
+    "/services/",
+    "/uc/services/",
+    "/diagdevice/",
 )
 
 
@@ -227,7 +230,7 @@ def replace_xdiag_origins(text: str, old_base: str, new_base: str) -> tuple[str,
         updated, config_count = config_origin.subn(new_base.rstrip("/"), updated)
 
     # Старые числовые адреса перенаправляем только когда сразу после origin
-    # идёт один из известных путей скачивания. SOAP namespace не затрагивается.
+    # идёт один из известных путей API/скачивания. SOAP namespace не затрагивается.
     legacy = re.compile(
         r"https?://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?"
         r"(?=(?:"
@@ -273,6 +276,11 @@ def patch_text_files(
         endpoint_changes += count
 
         if path.suffix.lower() == ".smali":
+            # Диагностический экран больше не проверяет WAN ping к Google/Baidu.
+            # Это не подделывает состояние ConnectivityManager и не гарантирует TLS.
+            if path.name.startswith("CheckServerFragment"):
+                for probe in ("www.baidu.comm", "www.baidu.com", "www.google.com", "www.qq.com", "www.apple.com"):
+                    updated = updated.replace('"' + probe + '"', '"' + urlparse(new_base).hostname + '"')
             # Эти два fallback-пути зашиты отдельно от assets/config.properties.
             # Меняем только строковые константы каталога, не методы диагностики.
             if path.name in {"PathUtils.smali", "DeviceProperties.smali"}:
@@ -317,6 +325,7 @@ def main() -> int:
         original_package,
     )
     write_network_security(root, lan_host, args.ca_cert, urlparse(args.new_base).scheme == "http")
+    patch_lan_connectivity(root)
 
     endpoints, package_strings = patch_text_files(
         root,
@@ -341,6 +350,10 @@ def main() -> int:
                 item["value"] = args.new_base.rstrip("/") + web_prefix + (parsed.path or "/") + (
                     "?" + parsed.query if parsed.query else "")
         bootstrap.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        # Проверяем именно адреса bootstrap, а не XML/SOAP namespace.
+        for item in config.get("data", {}).get("urls", []):
+            if urlparse(item["value"]).hostname != lan_host:
+                raise RuntimeError("Bootstrap still contains a non-local endpoint: " + str(item.get("key")))
 
     if endpoints == 0:
         raise RuntimeError(
@@ -359,6 +372,45 @@ def main() -> int:
     return 0
 
 
+def patch_lan_connectivity(root: Path) -> None:
+    """Два проверенных метода 7.00.014: активная сеть заменена поиском LAN.
+
+    Не подделываем результат проверки и не меняем проверки сертификатов/лицензий.
+    При изменении структуры APK сборка должна остановиться, а не молча пропустить патч.
+    """
+    targets = [
+        ("com/xdiagpro/g/a/d/a.smali", "public static u()Z", """    .locals 1
+    invoke-static {}, Lcom/xdiagpro/g/a/d/b;->e()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0}, Ltech/devwork/mdiag/LanNetwork;->connected(Landroid/content/Context;)Z
+    move-result v0
+    return v0
+"""),
+        ("com/xdiagpro/i/a/a/b.smali", "public static a(Landroid/content/Context;)Z", """    .locals 1
+    invoke-static {p0}, Ltech/devwork/mdiag/LanNetwork;->connected(Landroid/content/Context;)Z
+    move-result v0
+    return v0
+"""),
+    ]
+    for suffix, signature, body in targets:
+        matches = [p for directory in root.glob("smali*") if (p := directory / suffix).is_file()]
+        if len(matches) != 1:
+            raise RuntimeError(f"Expected one connectivity class: {suffix}")
+        path = matches[0]
+        text = path.read_text()
+        pattern = re.compile(r"(?ms)^\.method " + re.escape(signature) + r"\n.*?^\.end method")
+        original = pattern.search(text)
+        if original is None or "getActiveNetwork" not in original.group():
+            raise RuntimeError(f"Unrecognized connectivity method: {suffix}: {signature}")
+        text, count = pattern.subn(lambda _: ".method " + signature + "\n" + body + ".end method", text)
+        if count != 1:
+            raise RuntimeError("Connectivity method count mismatch")
+        path.write_text(text)
+    helper = root / "smali" / "tech/devwork/mdiag/LanNetwork.smali"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text(Path(__file__).with_name("LanNetwork.smali").read_text())
+    print("LAN connectivity: patched 2 verified methods, bind WiFi/Ethernet without WAN validation")
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
-
